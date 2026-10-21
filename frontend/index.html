@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071018">
+  <title>PRJ-00E1 | Private Theater</title>
+  <style>
+    :root{color-scheme:dark;--ink:#071018;--panel:#0c1720;--panel2:#101e28;--line:#1d3642;--text:#e7f2f2;--muted:#82969b;--cyan:#50e1ed;--blue:#4287ff;--green:#4be6a2;--red:#f04d67;--amber:#f8b95f;--display:'DejaVu Sans Condensed',sans-serif;--mono:'DejaVu Sans Mono',monospace}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background-color:var(--ink);background-image:linear-gradient(rgba(47,100,112,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(47,100,112,.055) 1px,transparent 1px),radial-gradient(ellipse at 50% 0%,#142b36 0%,transparent 48%);background-size:36px 36px,36px 36px,auto;color:var(--text);font-family:var(--mono);font-size:13px}
+    button,input{font:inherit}button{color:inherit;cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}.hidden{display:none!important}
+    .topbar{height:68px;padding:0 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;background:#071018e8;position:relative;z-index:2}.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:29px;height:29px;border:1px solid var(--cyan);display:grid;place-items:center;color:var(--cyan);font-family:var(--display);font-size:18px;font-weight:800;box-shadow:0 0 18px #50e1ed35}.brand-name{font:700 21px var(--display);letter-spacing:.06em}.brand-sub{color:var(--muted);font-size:10px;margin-left:4px}.live-count{display:flex;align-items:center;gap:12px;padding:6px 12px;border:1px solid var(--line);background:#0c1720;min-width:104px}.count-number{font:700 24px var(--display);color:var(--cyan);line-height:1}.count-label{font-size:9px;color:var(--muted);letter-spacing:.12em}.connection{font-size:10px;color:var(--green);display:flex;align-items:center;gap:8px}.connection:before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 9px currentColor}.connection.down{color:var(--red)}
+    .login-wrap{min-height:calc(100vh - 68px);display:grid;place-items:center;padding:34px 18px}.login{width:min(420px,100%);padding:30px;background:linear-gradient(145deg,#0e1b25,#09121a);border:1px solid #28505d;box-shadow:0 0 0 1px #50e1ed12,0 20px 90px #0008,0 0 40px #1e9db21b;position:relative;animation:enter .55s ease both}.login:before,.login:after{content:'';position:absolute;width:20px;height:20px;border-color:var(--cyan);border-style:solid}.login:before{top:-1px;left:-1px;border-width:1px 0 0 1px}.login:after{bottom:-1px;right:-1px;border-width:0 1px 1px 0}.eyebrow{color:var(--cyan);font-size:10px;letter-spacing:.2em;text-transform:uppercase}.login h1{font:700 40px/.95 var(--display);letter-spacing:.03em;margin:15px 0 9px}.login p{font-size:11px;color:var(--muted);line-height:1.7;margin:0 0 24px}.field{display:grid;gap:8px;margin:15px 0}.field label{font-size:10px;color:#a4b8bd;letter-spacing:.1em;text-transform:uppercase}.field input,.chat-input{width:100%;border:1px solid #29434e;background:#08121a;padding:13px;color:var(--text);border-radius:0}.field input::placeholder{color:#586a70}.enter-button,.upload-button{width:100%;border:1px solid #55e7f3;background:linear-gradient(100deg,#11677c,#137a89 50%,#1557a0);padding:14px 16px;color:#f4ffff;font:700 16px var(--display);letter-spacing:.12em;text-transform:uppercase;box-shadow:0 0 21px #47dfee2b;transition:filter .2s,box-shadow .2s}.enter-button:hover,.upload-button:hover{filter:brightness(1.2);box-shadow:0 0 30px #47dfee55}.form-error{min-height:17px;margin-top:10px;color:#ff7788;font-size:11px}.login-foot{margin-top:19px;padding-top:16px;border-top:1px solid var(--line);font-size:10px;color:var(--muted);line-height:1.6}.login-foot strong{color:#c4d4d7;font-weight:500}
+    .theater{height:calc(100vh - 68px);min-height:610px;max-width:1700px;margin:auto;padding:18px 20px 15px;display:grid;grid-template-columns:minmax(210px,.8fr) minmax(400px,2.2fr) minmax(230px,.9fr);gap:14px}.panel{min-height:0;background:#0a141cdd;border:1px solid var(--line);display:flex;flex-direction:column}.panel-head{height:45px;flex:0 0 45px;padding:0 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;color:#b7c9cc;font-size:10px;letter-spacing:.13em}.head-index{font-size:9px;color:#536f78}.guest-list,.chat-list{list-style:none;padding:8px;margin:0;overflow:auto;flex:1}.guest-row{display:flex;align-items:center;gap:10px;padding:10px 7px;border-bottom:1px solid #172932;font-size:11px;animation:enter .28s ease both}.avatar{width:28px;height:28px;flex:0 0 28px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#15576a,#24364a);border:1px solid #347184;color:#aaf5f8;font:600 10px var(--mono)}.guest-info{min-width:0;display:grid;gap:4px}.guest-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#d6e2e4}.guest-time{font-size:9px;color:#70858a}.host-tag{font-size:8px;color:var(--amber);margin-left:auto}
+    .stage{display:flex;min-height:0;flex-direction:column;gap:11px}.screen{min-height:270px;flex:1;background:#020609;border:1px solid #286175;box-shadow:0 0 0 1px #50e1ed0c,0 0 35px #19899b19;position:relative;display:grid;place-items:center;overflow:hidden}.screen:before{content:'';position:absolute;inset:12px;border:1px solid #10262e;pointer-events:none}.screen video{position:absolute;width:100%;height:100%;object-fit:contain;background:#020609}.screen-empty{padding:24px;text-align:center;display:grid;justify-items:center;gap:14px;z-index:1}.screen-icon{width:56px;height:56px;border:1px solid #367c8a;color:var(--cyan);display:grid;place-items:center;font-size:20px;box-shadow:0 0 24px #50e1ed16}.screen-message{font:600 20px var(--display);letter-spacing:.12em;color:#b4d7dc}.screen-hint{font-size:10px;color:#647b82}.movie-title{height:24px;flex:0 0 24px;font:600 19px var(--display);letter-spacing:.05em;color:#e5f3f3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.control-row{display:flex;align-items:center;gap:9px}.upload-button{width:auto;flex:1;padding:10px 13px;font-size:13px}.control-button,.leave-button{border:1px solid #29434e;background:#0b1821;color:#bcd0d2;padding:10px 13px;font-size:10px;letter-spacing:.08em}.control-button:hover,.leave-button:hover{border-color:#56cfda;color:white}.file-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}.upload-progress{height:3px;background:#132630;overflow:hidden}.upload-progress span{display:block;width:0;height:100%;background:var(--cyan);transition:width .15s}.live-strip{display:flex;justify-content:center;align-items:center;gap:10px;height:31px;flex:0 0 31px;font-size:10px;letter-spacing:.14em;color:#cce3e5}.live-dots{display:flex;gap:4px}.live-dots i{width:7px;height:7px;border-radius:50%;animation:pulse 1.2s infinite}.live-dots i:nth-child(1){background:var(--red);box-shadow:0 0 8px var(--red)}.live-dots i:nth-child(2){background:var(--blue);box-shadow:0 0 8px var(--blue);animation-delay:.2s}.live-dots i:nth-child(3){background:var(--green);box-shadow:0 0 8px var(--green);animation-delay:.4s}
+    .chat-panel{min-height:0}.chat-list{display:flex;flex-direction:column;gap:12px}.chat-message{font-size:10px;line-height:1.55;overflow-wrap:anywhere;animation:enter .25s ease both}.chat-meta{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px;color:#9ab3b9}.chat-meta time{color:#61777c;font-size:9px}.chat-text{color:#d5e1e2}.chat-compose{padding:10px;border-top:1px solid var(--line);display:flex;gap:7px}.chat-input{font-size:10px;padding:10px}.send-button{width:37px;flex:0 0 37px;border:1px solid #32717d;background:#10303a;color:var(--cyan);font-size:16px}.chat-hint{padding:0 11px 9px;color:#667b80;font-size:9px}.notice{position:fixed;left:50%;bottom:55px;transform:translateX(-50%);padding:9px 15px;background:#10242d;border:1px solid #428c99;color:#c9eff1;font-size:10px;z-index:5;box-shadow:0 8px 30px #0009}.offline{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:radial-gradient(ellipse,#242a2d 0%,#111719 54%,#070b0c 100%);text-align:center;padding:24px}.offline-inner{max-width:620px}.offline-title{font:800 clamp(42px,8vw,86px)/.92 var(--display);letter-spacing:.04em;color:#a5afb0;background:linear-gradient(110deg,#555d5e 4%,#f0f4f4 18%,#6d7778 31%,#d8dddd 48%,#50595a 62%,#e8eded 78%,#656e70 95%);background-size:220% auto;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 3px 0 #080a0b) drop-shadow(0 0 17px #e8ffff17);animation:shine 4.5s linear infinite}.offline-sub{margin-top:20px;color:#e8f2f3;font:600 17px var(--display);letter-spacing:.19em}.offline-state{margin-top:14px;color:#718185;font-size:10px}.retry-button{margin-top:25px;border:1px solid #5b696b;padding:10px 18px;background:#171e20;color:#dce5e6;font-size:10px;letter-spacing:.12em}
+    @keyframes pulse{0%,100%{opacity:.45;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}@keyframes enter{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}@keyframes shine{to{background-position:-220% center}}
+    @media(max-width:980px){.theater{height:auto;min-height:calc(100vh - 68px);grid-template-columns:minmax(190px,.8fr) minmax(350px,1.8fr);grid-template-rows:minmax(440px,65vh) 270px}.chat-panel{grid-column:1/-1}.stage{grid-column:2;grid-row:1}.logs-panel{grid-column:1;grid-row:1}.chat-panel{grid-row:2}}
+    @media(max-width:620px){.topbar{height:58px;padding:0 14px}.brand-name{font-size:18px}.brand-sub{display:none}.connection{font-size:9px}.live-count{min-width:75px;padding:5px 8px;gap:8px}.count-label{font-size:8px}.theater{height:auto;min-height:calc(100vh - 58px);padding:12px;display:flex;flex-direction:column}.stage{order:0;min-height:380px}.screen{min-height:230px;flex:none;aspect-ratio:16/9}.logs-panel{order:1;min-height:210px}.chat-panel{order:2;min-height:280px}.login{padding:24px}.control-row{flex-wrap:wrap}.upload-button{min-width:100%}.movie-title{font-size:17px}.topbar .brand{gap:8px}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
+  </style>
+  <style>
+    .login-backdrop{position:fixed;inset:68px 0 0;z-index:0;overflow:hidden;background:#071018}
+    .login-backdrop video,.login-backdrop-shade{position:absolute;inset:0;width:100%;height:100%}
+    .login-backdrop video{object-fit:cover;filter:brightness(.48) saturate(.75)}
+    .login-backdrop-shade{background:linear-gradient(90deg,#071018b8,#0710185c 50%,#071018b8),linear-gradient(0deg,#071018a8,transparent 45%,#07101870)}
+    .login-wrap{position:relative;z-index:1}
+    .login{background:linear-gradient(145deg,#0e1b25eF,#09121af2);backdrop-filter:blur(8px)}
+    .movie-name-input{width:160px;min-width:90px;border:1px solid #29434e;background:#08121a;padding:10px;color:var(--text);font:10px var(--mono)}
+    .movie-name-input::placeholder{color:#586a70}
+    .screen video{transition:opacity 1.2s ease}
+    .close-overlay{position:absolute;inset:0;z-index:2;display:grid;place-content:center;gap:10px;text-align:center;background:#020609e8;padding:20px;pointer-events:none}
+    .close-overlay strong{font:700 23px var(--display);letter-spacing:.14em;color:#d7f3f5}
+    .close-overlay span{color:#91aeb3;font-size:10px}
+    @media(max-width:620px){.movie-name-input{flex:1;min-width:140px}.upload-button{min-width:0;flex:1}}
+  </style>
+</head>
+<body>
+  <div class="login-backdrop" id="login-backdrop" aria-hidden="true">
+    <video id="login-background-video" autoplay muted playsinline preload="metadata"></video>
+    <div class="login-backdrop-shade"></div>
+  </div>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">P</span><span class="brand-name">PRJ-00E1</span><span class="brand-sub">PRIVATE SCREENING</span></div>
+    <div class="connection" id="connection">HOST ONLINE</div>
+    <div class="live-count" aria-label="Active connections"><span class="count-number" id="active-count">0</span><span class="count-label">SEATS<br>IN USE</span></div>
+  </header>
+
+  <main>
+    <section class="login-wrap" id="login-view">
+      <form class="login" id="login-form">
+        <div class="eyebrow">Private screening room / 11 seats</div>
+        <h1>TAKE YOUR<br>SEAT.</h1>
+        <p>Enter the current seat key and your guest credentials to join the shared screen.</p>
+        <div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="nickname" maxlength="24" placeholder="How should we call you?" required></div>
+        <div class="field"><label for="seat-key">Seat key</label><input id="seat-key" name="seat_key" autocomplete="off" placeholder="Provided by the host" required></div>
+        <div class="field"><label for="password">Theater password</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter the shared password" required></div>
+        <button class="enter-button" id="enter-button" type="submit">Enter Theater</button>
+        <div class="form-error" id="login-error" role="status"></div>
+        <div class="login-foot">The seat key rotates each time the host launches PRJ-00E1. <strong>Connections are limited to 11 guests.</strong></div>
+      </form>
+    </section>
+
+    <section class="theater hidden" id="theater-view">
+      <aside class="panel logs-panel">
+        <div class="panel-head"><span>GUEST LOG</span><span class="head-index">01 / LIVE</span></div>
+        <ul class="guest-list" id="guest-list" aria-live="polite"></ul>
+      </aside>
+
+      <section class="stage" aria-label="Shared theater screen">
+        <div class="screen" id="screen">
+          <video id="movie" autoplay muted playsinline preload="metadata" class="hidden"></video>
+          <div class="close-overlay hidden" id="close-overlay"><strong id="closing-message"></strong><span id="closing-detail"></span></div>
+          <div class="screen-empty" id="screen-empty"><div class="screen-icon" aria-hidden="true">▶</div><div class="screen-message" id="screen-message">YOUR SCREENING STARTS HERE</div><div class="screen-hint" id="screen-hint">Choose a video to share with the room</div></div>
+        </div>
+        <div class="movie-title" id="movie-title">NO MOVIE SELECTED</div>
+        <div class="control-row">
+          <input class="movie-name-input" id="movie-name" maxlength="120" placeholder="Movie title" aria-label="Movie title">
+          <label for="movie-file" class="upload-button">Upload Movie</label>
+          <input class="file-input" id="movie-file" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.m4v">
+          <button class="control-button" id="play-button" type="button" disabled>PLAY</button>
+          <button class="control-button" id="mute-button" type="button" aria-label="Turn sound on">UNMUTE</button>
+          <button class="control-button" id="cancel-button" type="button" disabled>CANCEL</button>
+          <button class="leave-button" id="leave-button" type="button">LEAVE</button>
+        </div>
+        <div class="upload-progress hidden" id="upload-progress"><span id="upload-bar"></span></div>
+        <div class="live-strip"><span class="live-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>LIVE STREAMING</span><span class="live-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+      </section>
+
+      <aside class="panel chat-panel">
+        <div class="panel-head"><span>THEATER CHAT</span><span class="head-index">02 / ROOM</span></div>
+        <ul class="chat-list" id="chat-list" aria-live="polite"></ul>
+        <form class="chat-compose" id="chat-form"><input class="chat-input" id="chat-input" maxlength="500" placeholder="Send a message..." autocomplete="off" aria-label="Chat message"><button class="send-button" type="submit" aria-label="Send message">↗</button></form>
+        <div class="chat-hint">Messages are shared with everyone in the room.</div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="offline hidden" id="offline-view" role="alert"><div class="offline-inner"><div class="offline-title">PRJ-00E1</div><div class="offline-sub">IS OFFLINE</div><div class="offline-state">THE HOST SERVER IS NOT RESPONDING</div><button class="retry-button" id="retry-button" type="button">RETRY CONNECTION</button></div></div>
+  <div class="notice hidden" id="notice" role="status"></div>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const elements = {
+      loginView: $("#login-view"), theaterView: $("#theater-view"), loginForm: $("#login-form"),
+      loginError: $("#login-error"), enterButton: $("#enter-button"), activeCount: $("#active-count"),
+      loginBackdrop: $("#login-backdrop"), loginBackgroundVideo: $("#login-background-video"),
+      connection: $("#connection"), guestList: $("#guest-list"), chatList: $("#chat-list"),
+      chatForm: $("#chat-form"), chatInput: $("#chat-input"), movie: $("#movie"),
+      screenEmpty: $("#screen-empty"), screenMessage: $("#screen-message"), screenHint: $("#screen-hint"),
+      closeOverlay: $("#close-overlay"), closingMessage: $("#closing-message"), closingDetail: $("#closing-detail"),
+      movieTitle: $("#movie-title"), movieFile: $("#movie-file"), playButton: $("#play-button"),
+      muteButton: $("#mute-button"),
+      cancelButton: $("#cancel-button"), leaveButton: $("#leave-button"),
+      movieName: $("#movie-name"),
+      uploadProgress: $("#upload-progress"), uploadBar: $("#upload-bar"),
+      offlineView: $("#offline-view"), notice: $("#notice"),
+    };
+    let sessionToken = sessionStorage.getItem("prj-seat-token") || "";
+    let currentMovie = "";
+    let currentPlayback = null;
+    let noticeTimer;
+    let pollTimer;
+    let syncInProgress = false;
+    let closedTransition = false;
+    const backgroundVideos = [
+      "7cbf3710848bf214460dd25f8964724a.mp4",
+      "1094007582ad766e7a3bf6a90a5fa229.mp4",
+    ];
+    let backgroundVideoIndex = 0;
+    let backgroundLoadAttempts = 0;
+
+    function playNextBackgroundVideo() {
+      if (backgroundLoadAttempts >= backgroundVideos.length) return;
+      const filename = backgroundVideos[backgroundVideoIndex];
+      backgroundVideoIndex = (backgroundVideoIndex + 1) % backgroundVideos.length;
+      backgroundLoadAttempts += 1;
+      elements.loginBackgroundVideo.src = `/assets/${filename}`;
+      elements.loginBackgroundVideo.load();
+      elements.loginBackgroundVideo.play().catch(() => {});
+    }
+
+    elements.loginBackgroundVideo.addEventListener("ended", () => {
+      backgroundLoadAttempts = 0;
+      playNextBackgroundVideo();
+    });
+    elements.loginBackgroundVideo.addEventListener("error", playNextBackgroundVideo);
+    playNextBackgroundVideo();
+
+    function initials(name) {
+      return name.split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
+    }
+
+    function showNotice(message) {
+      elements.notice.textContent = message;
+      elements.notice.classList.remove("hidden");
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => elements.notice.classList.add("hidden"), 3200);
+    }
+
+    async function api(path, data = {}, method = "POST") {
+      const response = await fetch(path, {
+        method,
+        headers: {"Content-Type": "application/json", "X-Session-Token": sessionToken},
+        body: method === "POST" ? JSON.stringify(data) : undefined,
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+      return result;
+    }
+
+    async function poll() {
+      try {
+        const response = await fetch("/api/state", {
+          headers: {"X-Session-Token": sessionToken}, cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Host unavailable");
+        const state = await response.json();
+        elements.offlineView.classList.add("hidden");
+        elements.connection.textContent = "HOST ONLINE";
+        elements.connection.classList.remove("down");
+        elements.activeCount.textContent = String(state.active);
+        if (sessionToken) renderState(state);
+      } catch {
+        elements.connection.textContent = "HOST OFFLINE";
+        elements.connection.classList.add("down");
+        elements.offlineView.classList.remove("hidden");
+      } finally {
+        pollTimer = setTimeout(poll, 1500);
+      }
+    }
+
+    function renderState(state) {
+      if (state.closed) {
+        elements.loginBackdrop.classList.add("hidden");
+        if (sessionToken && !closedTransition) {
+          closedTransition = true;
+          elements.loginView.classList.add("hidden");
+          elements.theaterView.classList.remove("hidden");
+          elements.movie.pause();
+          elements.movie.style.opacity = "0";
+          elements.closeOverlay.classList.remove("hidden");
+          elements.closingDetail.textContent = "The host has ended this screening";
+          const message = "THEATER IS CLOSED";
+          let typed = 0;
+          elements.closingMessage.textContent = "";
+          const typingTimer = setInterval(() => {
+            elements.closingMessage.textContent = message.slice(0, ++typed);
+            if (typed >= message.length) clearInterval(typingTimer);
+          }, 85);
+          setTimeout(() => {
+            sessionToken = "";
+            sessionStorage.removeItem("prj-seat-token");
+            elements.theaterView.classList.add("hidden");
+            elements.loginView.classList.remove("hidden");
+            elements.loginBackdrop.classList.remove("hidden");
+            closedTransition = false;
+          }, 3800);
+        }
+        return;
+      }
+      elements.loginView.classList.add("hidden");
+      elements.theaterView.classList.remove("hidden");
+      elements.loginBackdrop.classList.add("hidden");
+      if (state.waiting) {
+        elements.closeOverlay.classList.add("hidden");
+        elements.screenMessage.textContent = "WAITING FOR A SEAT";
+        elements.screenHint.textContent = "You will be admitted automatically when a guest leaves";
+        elements.playButton.disabled = true;
+        elements.cancelButton.disabled = true;
+        return;
+      }
+      if (!state.admitted) {
+        sessionToken = "";
+        sessionStorage.removeItem("prj-seat-token");
+        elements.theaterView.classList.add("hidden");
+        elements.loginView.classList.remove("hidden");
+        elements.loginBackdrop.classList.remove("hidden");
+        showNotice("Your theater session expired. Please sign in again.");
+        return;
+      }
+
+      renderGuests(state.guests || []);
+      renderMessages(state.messages || []);
+      elements.playButton.disabled = !state.movie;
+      elements.muteButton.disabled = !state.movie;
+      elements.cancelButton.disabled = !state.movie;
+      elements.playButton.textContent = state.playing ? "PAUSE" : "PLAY";
+      if (state.close_countdown !== null) {
+        elements.closeOverlay.classList.remove("hidden");
+        elements.closingMessage.textContent = `THEATER CLOSING IN ${state.close_countdown}`;
+        elements.closingDetail.textContent = "The host has scheduled the end of this screening";
+        elements.movie.style.opacity = String(Math.max(0, Math.min(1, state.close_countdown / 4)));
+      } else {
+        elements.closeOverlay.classList.add("hidden");
+        elements.movie.style.opacity = "1";
+      }
+      updateMovie(state);
+    }
+
+    function renderGuests(guests) {
+      const rows = guests.map((guest) => `<li class="guest-row"><span class="avatar" aria-hidden="true">${escapeHtml(initials(guest.username))}</span><span class="guest-info"><span class="guest-name">${escapeHtml(guest.username)}</span><span class="guest-time">JOINED ${escapeHtml(guest.joined)}</span></span></li>`).join("");
+      elements.guestList.innerHTML = rows || '<li class="guest-time" style="padding:12px">Waiting for guests</li>';
+    }
+
+    function renderMessages(messages) {
+      const wasNearBottom = elements.chatList.scrollHeight - elements.chatList.scrollTop - elements.chatList.clientHeight < 40;
+      elements.chatList.innerHTML = messages.map((message) => `<li class="chat-message"><div class="chat-meta"><span>${escapeHtml(message.username)}</span><time>${escapeHtml(message.time)}</time></div><div class="chat-text">${escapeHtml(message.text)}</div></li>`).join("");
+      if (wasNearBottom) elements.chatList.scrollTop = elements.chatList.scrollHeight;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"})[character]);
+    }
+
+    function updateMovie(state) {
+      if (state.movie !== currentMovie) {
+        currentMovie = state.movie;
+        elements.movieTitle.textContent = state.movie || "NO MOVIE SELECTED";
+        elements.screenEmpty.classList.toggle("hidden", Boolean(state.movie));
+        elements.movie.classList.toggle("hidden", !state.movie);
+        if (state.movie) {
+          elements.movie.src = `/media?refresh=${Date.now()}`;
+          elements.movie.load();
+          elements.movie.muted = true;
+          currentPlayback = null;
+        } else {
+          elements.movie.removeAttribute("src");
+          elements.movie.load();
+          elements.movie.playbackRate = 1;
+        }
+      }
+      if (!state.movie) {
+        elements.screenMessage.textContent = "YOUR SCREENING STARTS HERE";
+        elements.screenHint.textContent = "Choose a video to share with the room";
+        return;
+      }
+      const playbackChanged = currentPlayback !== state.playing;
+      if (playbackChanged) {
+        currentPlayback = state.playing;
+        if (state.playing) {
+          elements.movie.currentTime = state.position;
+          elements.movie.play().catch(() => {
+          elements.playButton.textContent = "START PLAYER";
+          showNotice("Tap START PLAYER to begin video in this browser.");
+          });
+        } else {
+          elements.movie.pause();
+          elements.movie.playbackRate = 1;
+          if (Number.isFinite(state.position)) elements.movie.currentTime = state.position;
+        }
+      }
+      if (state.playing && !playbackChanged && Number.isFinite(state.position)) {
+        const drift = state.position - elements.movie.currentTime;
+        elements.movie.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.02));
+      }
+      if (state.close_countdown === null) {
+        elements.screenMessage.textContent = "NOW SHOWING";
+        elements.screenHint.textContent = state.movie;
+      }
+      elements.playButton.textContent = state.playing
+        ? (elements.movie.paused ? "START PLAYER" : "PAUSE")
+        : "PLAY";
+      elements.muteButton.textContent = elements.movie.muted ? "UNMUTE" : "MUTE";
+      elements.muteButton.setAttribute("aria-label", elements.movie.muted ? "Turn sound on" : "Mute movie");
+    }
+
+    elements.loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      elements.loginError.textContent = "";
+      elements.enterButton.disabled = true;
+      elements.enterButton.textContent = "CONNECTING...";
+      const form = new FormData(elements.loginForm);
+      try {
+        const result = await api("/api/login", Object.fromEntries(form.entries()));
+        sessionToken = result.token;
+        closedTransition = false;
+        sessionStorage.setItem("prj-seat-token", sessionToken);
+        elements.loginForm.reset();
+        showNotice(result.admitted ? "Seat confirmed. Welcome to the theater." : "The theater is full. You are in the waiting room.");
+        await pollOnce();
+      } catch (error) {
+        elements.loginError.textContent = error.message;
+      } finally {
+        elements.enterButton.disabled = false;
+        elements.enterButton.textContent = "Enter Theater";
+      }
+    });
+
+    async function pollOnce() {
+      const response = await fetch("/api/state", {headers:{"X-Session-Token":sessionToken},cache:"no-store"});
+      if (!response.ok) throw new Error("The host is not responding.");
+      const state = await response.json();
+      elements.activeCount.textContent = String(state.active);
+      renderState(state);
+    }
+
+    elements.chatForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = elements.chatInput.value.trim();
+      if (!text) return;
+      elements.chatInput.value = "";
+      try { await api("/api/chat", {text}); }
+      catch (error) { showNotice(error.message); }
+    });
+
+    elements.playButton.addEventListener("click", async () => {
+      if (currentPlayback && elements.movie.paused) {
+        elements.movie.play().catch(() => showNotice("The movie could not start in this browser."));
+        return;
+      }
+      const shouldPause = currentPlayback;
+      if (shouldPause) elements.movie.pause();
+      else elements.movie.play().catch(() => showNotice("The movie could not start in this browser."));
+      try { await api("/api/control", {action: shouldPause ? "pause" : "play"}); await pollOnce(); }
+      catch (error) { showNotice(error.message); }
+    });
+
+    elements.muteButton.addEventListener("click", () => {
+      elements.movie.muted = !elements.movie.muted;
+      elements.muteButton.textContent = elements.movie.muted ? "UNMUTE" : "MUTE";
+      elements.muteButton.setAttribute("aria-label", elements.movie.muted ? "Turn sound on" : "Mute movie");
+    });
+
+    elements.cancelButton.addEventListener("click", async () => {
+      try { await api("/api/control", {action:"cancel"}); await pollOnce(); }
+      catch (error) { showNotice(error.message); }
+    });
+
+    elements.movieFile.addEventListener("change", () => {
+      const file = elements.movieFile.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024 * 1024) {
+        showNotice("Choose a video smaller than 3 GB.");
+        elements.movieFile.value = "";
+        return;
+      }
+      const request = new XMLHttpRequest();
+      request.open("POST", "/api/upload");
+      request.setRequestHeader("X-Session-Token", sessionToken);
+      request.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+      request.setRequestHeader("X-Movie-Title", encodeURIComponent(elements.movieName.value.trim()));
+      elements.uploadProgress.classList.remove("hidden");
+      request.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) elements.uploadBar.style.width = `${Math.round(event.loaded / event.total * 100)}%`;
+      });
+      request.addEventListener("load", async () => {
+        elements.uploadProgress.classList.add("hidden");
+        elements.uploadBar.style.width = "0";
+        elements.movieFile.value = "";
+        let result = {};
+        try { result = JSON.parse(request.responseText); } catch {}
+        if (request.status >= 200 && request.status < 300) {
+          showNotice("Movie uploaded. The new screening is ready.");
+          await pollOnce();
+        } else showNotice(result.error || "The movie could not be uploaded.");
+      });
+      request.addEventListener("error", () => { elements.uploadProgress.classList.add("hidden"); showNotice("Upload interrupted. Check your connection."); });
+      request.send(file);
+    });
+
+    elements.leaveButton.addEventListener("click", async () => {
+      const token = sessionToken;
+      sessionToken = "";
+      sessionStorage.removeItem("prj-seat-token");
+      try { await fetch("/api/leave", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})}); } catch {}
+      elements.theaterView.classList.add("hidden");
+      elements.loginView.classList.remove("hidden");
+      elements.loginBackdrop.classList.remove("hidden");
+      elements.movie.pause();
+    });
+
+    $("#retry-button").addEventListener("click", async () => {
+      try { await pollOnce(); elements.offlineView.classList.add("hidden"); }
+      catch { showNotice("The host is still offline."); }
+    });
+
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    poll();
+  </script>
+</body>
+</html>

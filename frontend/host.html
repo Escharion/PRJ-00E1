@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071018">
+  <title>PRJ-00E1 | Host Console</title>
+  <style>
+    :root{color-scheme:dark;--bg:#071018;--panel:#0c1720;--line:#1d3642;--text:#e7f2f2;--muted:#82969b;--cyan:#50e1ed;--green:#4be6a2;--red:#f04d67;--mono:'DejaVu Sans Mono',monospace;--display:'DejaVu Sans Condensed',sans-serif}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0,#142b36 0,transparent 55%),var(--bg);color:var(--text);font:12px var(--mono)}button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}.hidden{display:none!important}
+    header{height:64px;padding:0 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;background:#071018e8}.brand{font:700 21px var(--display);letter-spacing:.06em}.brand span{font:10px var(--mono);color:var(--muted);margin-left:12px}.count{border:1px solid var(--line);padding:7px 12px;color:var(--cyan);font:700 20px var(--display)}
+    .login-wrap{min-height:calc(100vh - 64px);display:grid;place-items:center;padding:20px}.login,.panel{background:#0a141c;border:1px solid var(--line)}.login{width:min(400px,100%);padding:28px;box-shadow:0 0 38px #50e1ed14}.eyebrow{color:var(--cyan);font-size:10px;letter-spacing:.16em}.login h1{font:700 30px var(--display);margin:12px 0}.login p{color:var(--muted);font-size:11px;line-height:1.6}.login input,.chat-input,.terminal-input,.title-input{width:100%;background:#071018;border:1px solid #29434e;padding:12px;color:var(--text)}.login label{display:block;color:#a4b8bd;font-size:10px;margin:16px 0 7px;text-transform:uppercase;letter-spacing:.1em}.primary,.action{border:1px solid #387c89;background:#10303a;color:#dfffff;padding:10px 13px;letter-spacing:.08em}.primary{width:100%;margin-top:18px;background:linear-gradient(100deg,#11677c,#1557a0);font:700 14px var(--display)}.error{min-height:20px;color:#ff7788;padding-top:8px}
+    .dashboard{height:calc(100vh - 64px);min-height:600px;padding:14px;display:grid;grid-template-columns:minmax(230px,.9fr) minmax(380px,1.6fr) minmax(250px,.9fr);gap:12px}.panel{min-height:0;display:flex;flex-direction:column}.panel h2{font:600 11px var(--mono);letter-spacing:.12em;color:#a8c2c5;border-bottom:1px solid var(--line);padding:14px;margin:0}.log,.chat{padding:10px;overflow:auto;flex:1;min-height:120px}.log-line,.message{font-size:10px;line-height:1.6;padding:5px 0;border-bottom:1px solid #172932;overflow-wrap:anywhere}.terminal,.compose{padding:10px;border-top:1px solid var(--line);display:flex;gap:7px}.terminal-input,.chat-input{padding:10px;font-size:10px}.terminal button,.compose button{width:40px;flex:0 0 40px}.middle{display:flex;flex-direction:column;gap:10px;min-height:0}.screen{flex:1;min-height:200px;border:1px solid #286175;background:#020609;box-shadow:0 0 30px #19899b19;display:grid;place-items:center;text-align:center;padding:18px;color:#8bcfff;font:700 20px var(--display)}.movie-title{color:#e5f3f3;font:600 16px var(--display);min-height:20px}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.title-input{width:160px;padding:9px;font-size:10px}.file-label{padding:9px 13px;border:1px solid #55e7f3;background:#11677c;color:white;font:700 12px var(--display);cursor:pointer}.file-input{position:absolute;width:1px;height:1px;opacity:0}.small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.key{color:var(--cyan)}.live{padding:8px;text-align:center;color:var(--green);font-size:10px;letter-spacing:.14em}.chat{display:flex;flex-direction:column;gap:10px}.message strong{color:#b8d5d8}.message time{color:#687e83;font-size:9px;float:right}.status{color:var(--muted);font-size:10px;min-height:14px}
+    @media(max-width:900px){.dashboard{height:auto;min-height:calc(100vh - 64px);grid-template-columns:minmax(200px,.8fr) minmax(300px,1.3fr);grid-template-rows:minmax(400px,60vh) 280px}.right{grid-column:1/-1}.middle{grid-column:2;grid-row:1}.left{grid-column:1;grid-row:1}.right{grid-row:2}}
+    @media(max-width:600px){header{height:56px;padding:0 14px}.brand{font-size:18px}.brand span{display:none}.dashboard{height:auto;display:flex;flex-direction:column;padding:10px}.middle{order:0;min-height:440px}.left{order:1;min-height:260px}.right{order:2;min-height:300px}.screen{min-height:220px}.actions{align-items:stretch}.title-input{flex:1;min-width:120px}}
+  </style>
+  <style>
+    .screen{position:relative;overflow:hidden;padding:0}
+    .screen video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#020609}
+    .screen-label{position:relative;z-index:1;padding:14px;background:#020609a8}
+  </style>
+</head>
+<body>
+  <header><div class="brand">PRJ-00E1 <span>CLOUD HOST CONSOLE</span></div><div class="count"><span id="active">0</span> / 11</div></header>
+  <main>
+    <section class="login-wrap" id="login-view"><form class="login" id="login-form"><div class="eyebrow">HOST AUTHENTICATION</div><h1>THEATER CONTROL</h1><p>Use the host secret configured in your cloud service environment.</p><label for="password">Host password</label><input id="password" type="password" autocomplete="current-password" required><button class="primary" type="submit">SIGN IN</button><div class="error" id="error" role="status"></div></form></section>
+    <section class="dashboard hidden" id="dashboard">
+      <section class="panel left"><h2>TERMINAL / GUEST LOG</h2><div class="log" id="events"></div><form class="terminal" id="command-form"><input class="terminal-input" id="command" placeholder="close theater 30" autocomplete="off"><button class="action" type="submit" aria-label="Run command">↵</button></form></section>
+      <section class="middle"><div class="screen" id="screen"><video id="preview" muted playsinline preload="metadata"></video><span class="screen-label" id="screen-label">READY FOR SCREENING</span></div><div class="movie-title" id="movie-title">NO MOVIE SELECTED</div><div class="actions"><input class="title-input" id="title" placeholder="Movie title" maxlength="120" aria-label="Movie title"><label class="file-label" for="file">UPLOAD MOVIE</label><input class="file-input" id="file" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.m4v"><button class="action" id="play" type="button">PLAY</button><button class="action" id="mute-preview" type="button" disabled>UNMUTE</button><button class="action" id="cancel" type="button">CANCEL</button></div><div class="status" id="status"></div><div class="small">GUEST LINK <a id="guest-link" class="key"></a></div><div class="small">SEAT KEY <strong class="key" id="seat-key">----</strong></div><div class="live">● LIVE STREAMING</div></section>
+      <section class="panel right"><h2>THEATER CHAT</h2><div class="chat" id="messages"></div><form class="compose" id="chat-form"><input class="chat-input" id="chat" maxlength="500" placeholder="Message guests..." autocomplete="off"><button class="action" type="submit" aria-label="Send message">↗</button></form></section>
+    </section>
+  </main>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const loginView = $("#login-view");
+    const dashboard = $("#dashboard");
+    const sessionKey = "prj-cloud-host-token";
+    let hostToken = sessionStorage.getItem(sessionKey) || "";
+    let lastEvent = "";
+    let lastMessage = "";
+    let previewMovie = "";
+    let previewPlaying = null;
+
+    async function request(path, body, method = "POST") {
+      const headers = {"X-Host-Token": hostToken};
+      const options = {method, headers, cache:"no-store"};
+      if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(path, options);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+      return result;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"})[character]);
+    }
+
+    async function poll() {
+      if (!hostToken) return;
+      try {
+        const state = await request("/api/host/state", undefined, "GET");
+        loginView.classList.add("hidden");
+        dashboard.classList.remove("hidden");
+        $("#active").textContent = state.active;
+        $("#seat-key").textContent = state.seat_key;
+        $("#guest-link").href = location.origin + "/";
+        $("#guest-link").textContent = location.origin + "/";
+        $("#movie-title").textContent = state.movie || "NO MOVIE SELECTED";
+        $("#play").textContent = state.playing ? "PAUSE" : "PLAY";
+        $("#play").disabled = !state.movie;
+        $("#mute-preview").disabled = !state.movie;
+        $("#mute-preview").textContent = $("#preview").muted ? "UNMUTE" : "MUTE";
+        $("#cancel").disabled = !state.movie;
+        $("#screen-label").textContent = state.close_countdown !== null ? `THEATER CLOSING IN ${state.close_countdown}` : state.movie || (state.closed ? "THEATER IS CLOSED" : "READY FOR SCREENING");
+        const preview = $("#preview");
+        if (previewMovie !== state.movie) {
+          previewMovie = state.movie;
+          preview.src = state.movie ? `/host-media?refresh=${Date.now()}` : "";
+          preview.load();
+          previewPlaying = null;
+        }
+        if (previewPlaying !== state.playing) {
+          previewPlaying = state.playing;
+          if (state.playing) {
+            if (preview.readyState >= 1) preview.currentTime = state.position;
+            preview.play().catch(() => { $("#status").textContent = "Host preview could not start."; });
+          } else {
+            preview.pause();
+            preview.playbackRate = 1;
+            if (preview.readyState >= 1) preview.currentTime = state.position;
+          }
+        } else if (state.playing) {
+          const drift = state.position - preview.currentTime;
+          preview.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.02));
+        }
+        const events = state.events || [];
+        const eventMarker = events.length ? JSON.stringify(events[events.length - 1]) : "";
+        if (eventMarker !== lastEvent) {
+          $("#events").innerHTML = events.map((event) => `<div class="log-line">[${escapeHtml(event.time)}] ${escapeHtml(event.text)}</div>`).join("");
+          lastEvent = eventMarker;
+          $("#events").scrollTop = $("#events").scrollHeight;
+        }
+        const messages = state.messages || [];
+        const messageMarker = messages.length ? JSON.stringify(messages[messages.length - 1]) : "";
+        if (messageMarker !== lastMessage) {
+          $("#messages").innerHTML = messages.map((message) => `<div class="message"><strong>${escapeHtml(message.username)}</strong><time>${escapeHtml(message.time)}</time><br>${escapeHtml(message.text)}</div>`).join("");
+          lastMessage = messageMarker;
+          $("#messages").scrollTop = $("#messages").scrollHeight;
+        }
+      } catch (error) {
+        hostToken = "";
+        sessionStorage.removeItem(sessionKey);
+        dashboard.classList.add("hidden");
+        loginView.classList.remove("hidden");
+        $("#error").textContent = error.message;
+      } finally {
+        if (hostToken) setTimeout(poll, 1500);
+      }
+    }
+
+    $("#login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("#error").textContent = "";
+      try {
+        const result = await request("/api/host/login", {password:$("#password").value});
+        hostToken = result.token;
+        sessionStorage.setItem(sessionKey, hostToken);
+        $("#password").value = "";
+        poll();
+      } catch (error) { $("#error").textContent = error.message; }
+    });
+
+    $("#command-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const command = $("#command").value.trim();
+      if (!command) return;
+      $("#command").value = "";
+      try { await request("/api/host/command", {command}); $("#status").textContent = `Executed: ${command}`; poll(); }
+      catch (error) { $("#status").textContent = error.message; }
+    });
+
+    $("#play").addEventListener("click", async () => {
+      const preview = $("#preview");
+      const shouldPause = $("#play").textContent === "PAUSE";
+      if (shouldPause) preview.pause();
+      else preview.play().catch(() => {});
+      try { await request("/api/host/control", {action:shouldPause ? "pause" : "play"}); poll(); }
+      catch (error) { $("#status").textContent = error.message; }
+    });
+    $("#cancel").addEventListener("click", async () => {
+      try { await request("/api/host/control", {action:"cancel"}); poll(); }
+      catch (error) { $("#status").textContent = error.message; }
+    });
+    $("#mute-preview").addEventListener("click", () => {
+      const preview = $("#preview");
+      preview.muted = !preview.muted;
+      $("#mute-preview").textContent = preview.muted ? "UNMUTE" : "MUTE";
+    });
+
+    $("#file").addEventListener("change", () => {
+      const file = $("#file").files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024 * 1024) { $("#status").textContent = "Choose a video smaller than 3 GB."; return; }
+      const upload = new XMLHttpRequest();
+      upload.open("POST", "/api/upload");
+      upload.setRequestHeader("X-Host-Token", hostToken);
+      upload.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+      upload.setRequestHeader("X-Movie-Title", encodeURIComponent($("#title").value.trim()));
+      $("#status").textContent = "Uploading movie...";
+      upload.upload.addEventListener("progress", (event) => { if (event.lengthComputable) $("#status").textContent = `Uploading ${Math.round(event.loaded / event.total * 100)}%`; });
+      upload.addEventListener("load", () => {
+        const result = JSON.parse(upload.responseText || "{}");
+        $("#status").textContent = upload.status < 300 ? "Movie ready for screening." : result.error || "Upload failed.";
+        $("#file").value = "";
+        if (upload.status < 300) poll();
+      });
+      upload.addEventListener("error", () => { $("#status").textContent = "Upload interrupted."; });
+      upload.send(file);
+    });
+
+    $("#chat-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = $("#chat").value.trim();
+      if (!text) return;
+      $("#chat").value = "";
+      try { await request("/api/host/chat", {text}); poll(); }
+      catch (error) { $("#status").textContent = error.message; }
+    });
+
+    poll();
+  </script>
+</body>
+</html>

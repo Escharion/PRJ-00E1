@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: prj-00e1
+    runtime: python
+    plan: starter
+    buildCommand: python -m compileall -q .
+    startCommand: python watch.py --cloud
+    healthCheckPath: /api/state
+    disk:
+      name: theater-media
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: PRJ_ADMIN_PASSWORD
+        sync: false
+      - key: PRJ_MEDIA_DIR
+        value: /var/data/media
