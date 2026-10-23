@@ -7,6 +7,7 @@ import hmac
 import mimetypes
 import os
 import queue
+import re
 import secrets
 import shutil
 import socket
@@ -59,6 +60,10 @@ BACKGROUND_VIDEOS = {
 	"7cbf3710848bf214460dd25f8964724a.mp4",
 	"1094007582ad766e7a3bf6a90a5fa229.mp4",
 }
+CLOUDFLARE_URL_PATTERN = re.compile(
+	r"https://[a-z0-9-]+\.trycloudflare\.com(?=[/: \t\r\n]|$)",
+	re.IGNORECASE,
+)
 
 
 def current_time() -> str:
@@ -668,6 +673,7 @@ class HostApp:
 		self.root = root
 		self.state = state
 		self.guest_url = guest_url
+		self.local_guest_url = guest_url
 		self.command_history: list[str] = []
 		self.history_index = 0
 		self.last_event_marker: tuple[str, str] | None = None
@@ -681,6 +687,8 @@ class HostApp:
 		self.preview_frames: queue.Queue[bytes] = queue.Queue(maxsize=2)
 		self.preview_reader: threading.Thread | None = None
 		self.preview_eof = threading.Event()
+		self.public_link_updates: queue.Queue[tuple[str, str]] = queue.Queue()
+		self.tunnel_process: subprocess.Popen[str] | None = None
 		self.root.title(f"{APP_NAME} | Theater Host")
 		self.root.geometry("1200x760")
 		self.root.minsize(920, 620)
@@ -782,6 +790,83 @@ class HostApp:
 		self.chat_entry.insert(0, "Message guests...")
 		self.chat_entry.bind("<FocusIn>", lambda _event: self._clear_chat_placeholder())
 		self.chat_entry.bind("<Return>", self._send_host_message)
+
+	def start_public_tunnel(self, port: int) -> None:
+		"""Expose the local theater through an opt-in Cloudflare quick tunnel."""
+		cloudflared = shutil.which("cloudflared")
+		if cloudflared is None:
+			self._append_terminal(
+				"Public link unavailable: install cloudflared from "
+				"https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+			)
+			return
+		try:
+			process = subprocess.Popen(
+				[
+					cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
+					"--no-autoupdate",
+				],
+				stdin=subprocess.DEVNULL,
+				stdout=subprocess.PIPE,
+				stderr=subprocess.STDOUT,
+				text=True,
+				encoding="utf-8",
+				errors="replace",
+				bufsize=1,
+			)
+		except OSError as error:
+			self._append_terminal(f"Could not start Cloudflare Tunnel: {error}")
+			return
+
+		self.tunnel_process = process
+		self.link_label.configure(text="PUBLIC GUEST LINK  Waiting for Cloudflare...")
+		threading.Thread(
+			target=self._read_tunnel_output,
+			args=(process,),
+			name="cloudflare-tunnel-output",
+			daemon=True,
+		).start()
+
+	def _read_tunnel_output(self, process: subprocess.Popen[str]) -> None:
+		"""Find the public URL while continuing to drain tunnel logs."""
+		output_tail: deque[str] = deque(maxlen=6)
+		public_url_found = False
+		if process.stdout is not None:
+			for line in process.stdout:
+				public_url = cloudflare_url_from_line(line)
+				if public_url and not public_url_found:
+					self.public_link_updates.put(("url", public_url))
+					public_url_found = True
+				elif line.strip():
+					output_tail.append(line.strip())
+
+		process.poll()
+		if not public_url_found:
+			details = " ".join(output_tail)
+			message = "Cloudflare Tunnel stopped before creating a public link."
+			if details:
+				message = f"{message} {details}"
+			self.public_link_updates.put(("error", message))
+		elif process.returncode is not None:
+			self.public_link_updates.put(
+				("error", "Cloudflare Tunnel stopped; the public link is no longer available.")
+			)
+
+	def _refresh_public_link(self) -> None:
+		"""Apply tunnel status updates on the Tkinter UI thread."""
+		while True:
+			try:
+				status, value = self.public_link_updates.get_nowait()
+			except queue.Empty:
+				return
+			if status == "url":
+				self.guest_url = f"{value}/"
+				self.link_label.configure(text=f"GUEST LINK  {self.guest_url}")
+				self._append_terminal(f"Public guest link ready: {self.guest_url}")
+			else:
+				self.guest_url = self.local_guest_url
+				self.link_label.configure(text=f"LOCAL GUEST LINK  {self.guest_url}")
+				self._append_terminal(value)
 
 	def _button(self, parent: tk.Widget, text: str, command: object, accent: bool = False) -> tk.Button:
 		"""Create a fixed-size host action button with consistent styling."""
@@ -911,6 +996,7 @@ class HostApp:
 
 	def _refresh(self) -> None:
 		"""Refresh the host's active-seat counter, logs, chat, and movie title."""
+		self._refresh_public_link()
 		snapshot = self.state.state_for()
 		self.count_label.configure(text=str(snapshot["active"]))
 		screen_text = f"THEATER CLOSING IN {snapshot['close_countdown']}" if snapshot["close_countdown"] is not None else (
@@ -1074,9 +1160,22 @@ class HostApp:
 			self.state.sessions.clear()
 			self.state.closed = True
 		self._stop_local_preview()
+		self._stop_public_tunnel()
 		self.server.shutdown()
 		self.server.server_close()
 		self.root.destroy()
+
+	def _stop_public_tunnel(self) -> None:
+		"""Stop the optional internet tunnel with a bounded graceful wait."""
+		process = self.tunnel_process
+		if process is None or process.poll() is not None:
+			return
+		process.terminate()
+		try:
+			process.wait(timeout=2)
+		except subprocess.TimeoutExpired:
+			process.kill()
+			process.wait()
 
 
 def find_available_port() -> int:
@@ -1093,12 +1192,30 @@ def find_available_port() -> int:
 	raise OSError("No free theater port was found between 8765 and 8784.")
 
 
+def cloudflare_url_from_line(line: str) -> str | None:
+	"""Extract only a Cloudflare quick-tunnel URL from one log line."""
+	match = CLOUDFLARE_URL_PATTERN.search(line)
+	return match.group(0) if match else None
+
+
+def guest_url_for(port: int, cloud_mode: bool, external_url: str) -> str:
+	"""Choose the externally reachable URL or the appropriate local address."""
+	if external_url:
+		return f"{external_url.rstrip('/')}/"
+	if cloud_mode:
+		return f"http://0.0.0.0:{port}/"
+	return f"http://{local_ip_address()}:{port}/"
+
+
 def main() -> None:
 	"""Start local Tkinter hosting or the headless cloud web service."""
 	seat_key = secrets.token_urlsafe(6).replace("-", "A").replace("_", "B").upper()
 	state = TheaterState(seat_key)
 	cloud_mode = "--cloud" in sys.argv[1:] or os.environ.get("PRJ_MODE", "").lower() == "cloud"
+	public_mode = "--public" in sys.argv[1:]
 	if cloud_mode:
+		if public_mode:
+			raise SystemExit("--public is for desktop hosting; cloud services already have a public URL.")
 		admin_password = os.environ.get("PRJ_ADMIN_PASSWORD", "")
 		if len(admin_password) < 16:
 			raise SystemExit("Set PRJ_ADMIN_PASSWORD to a secret of at least 16 characters for cloud hosting.")
@@ -1115,9 +1232,7 @@ def main() -> None:
 		os.environ.get("PRJ_PUBLIC_URL", "").rstrip("/")
 		or os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 	)
-	local_url = external_url + "/" if cloud_mode and external_url else (
-		f"http://0.0.0.0:{port}/" if cloud_mode else f"http://{local_ip_address()}:{port}/"
-	)
+	local_url = guest_url_for(port, cloud_mode, external_url)
 	print(f"{APP_NAME} is ready at {local_url}")
 	print(f"Seat key: {seat_key}")
 	print("Share the seat key and built-in password with invited guests.")
@@ -1125,7 +1240,7 @@ def main() -> None:
 		print(f"Host console: {local_url.rstrip('/')}/host")
 		server.serve_forever()
 		return
-	print("For internet access, configure router port forwarding or use a trusted tunnel.")
+	print("For internet access, run with --public or configure a trusted HTTPS tunnel.")
 
 	server_thread = threading.Thread(target=server.serve_forever, name="theater-http", daemon=True)
 	server_thread.start()
@@ -1133,9 +1248,15 @@ def main() -> None:
 		root = tk.Tk()
 		app = HostApp(root, state, local_url)
 		app.server = server
+		if public_mode and not external_url:
+			app.start_public_tunnel(port)
+		elif public_mode:
+			app._append_terminal(f"Using configured public URL: {local_url}")
 		app._refresh()
 		root.mainloop()
 	except tk.TclError as error:
+		if "app" in locals():
+			app._stop_public_tunnel()
 		server.shutdown()
 		server.server_close()
 		raise SystemExit(f"Could not open the Tkinter host window: {error}") from error

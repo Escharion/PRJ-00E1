@@ -1,16 +1,26 @@
 """Behavior checks for the lightweight theater room and authentication."""
 
 import http.client
+import io
 import json
+import queue
 import threading
 import time
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.user import user_login
-from watch import MAX_SEATS, TheaterHandler, TheaterServer, TheaterState, read_exactly
+from watch import (
+    MAX_SEATS,
+    TheaterHandler,
+    TheaterServer,
+    TheaterState,
+    cloudflare_url_from_line,
+    guest_url_for,
+    read_exactly,
+)
 import watch
 
 
@@ -23,6 +33,48 @@ class TheaterStateTests(unittest.TestCase):
         self.assertFalse(user_login("Guest", "OLD-KEY", "hello_hello3_whatch_with me", "TEST-KEY"))
         self.assertFalse(user_login("Guest", "TEST-KEY", "incorrect", "TEST-KEY"))
         self.assertFalse(user_login("  ", "TEST-KEY", "hello_hello3_whatch_with me", "TEST-KEY"))
+
+    def test_cloudflare_tunnel_url_is_extracted_from_logs(self) -> None:
+        self.assertEqual(
+            cloudflare_url_from_line(
+                "Quick Tunnel is ready at https://example-name.trycloudflare.com"
+            ),
+            "https://example-name.trycloudflare.com",
+        )
+        self.assertIsNone(cloudflare_url_from_line("Tunnel connection established"))
+        self.assertIsNone(cloudflare_url_from_line("https://example.com is not a quick tunnel"))
+
+    def test_public_tunnel_failure_keeps_the_local_guest_link_available(self) -> None:
+        app = watch.HostApp.__new__(watch.HostApp)
+        app.local_guest_url = "http://192.0.2.10:8765/"
+        app.guest_url = "https://theater.trycloudflare.com/"
+        app.public_link_updates = queue.Queue()
+        app.link_label = Mock()
+        app._append_terminal = Mock()
+        app.public_link_updates.put(("error", "Cloudflare Tunnel stopped."))
+
+        app._refresh_public_link()
+
+        self.assertEqual(app.guest_url, app.local_guest_url)
+        app.link_label.configure.assert_called_once_with(
+            text=f"LOCAL GUEST LINK  {app.local_guest_url}"
+        )
+
+    def test_guest_url_prefers_configured_public_url_in_desktop_mode(self) -> None:
+        self.assertEqual(
+            guest_url_for(8765, False, "https://theater.example/"),
+            "https://theater.example/",
+        )
+        self.assertEqual(
+            guest_url_for(8765, True, "https://theater.example/"),
+            "https://theater.example/",
+        )
+        self.assertEqual(guest_url_for(8765, True, ""), "http://0.0.0.0:8765/")
+        with patch.object(watch, "local_ip_address", return_value="192.0.2.10"):
+            self.assertEqual(
+                guest_url_for(8765, False, ""),
+                "http://192.0.2.10:8765/",
+            )
 
     def test_waiting_guest_is_promoted_when_a_seat_opens(self) -> None:
         guests = [self.state.add_guest(f"Guest {index}") for index in range(MAX_SEATS + 1)]

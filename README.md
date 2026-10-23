@@ -4,13 +4,32 @@ A lightweight Tkinter movie-night host with a browser-based guest theater. The P
 
 ## Start
 
-Run from the project directory:
+Run from the project directory for devices on the same Wi-Fi/LAN:
 
 ```sh
 python3 watch.py
 ```
 
-The desktop host shows the current guest URL, the seat key generated for this run, and the shared password: `hello_hello3_whatch_with me`. Open the displayed URL manually in a browser or share it with invited guests along with the current seat key and password. The server admits up to 11 guests and queues additional guests until a seat opens. Closing the host app stops the server.
+The desktop host shows the local guest URL, a seat key generated for this run, and the shared guest password. Open the displayed URL manually in a browser or share it with invited guests along with the seat key and password. The server admits up to 11 guests and queues additional guests until a seat opens. Closing the host app stops the server.
+
+## Host from your PC for friends on the internet
+
+Install the official `cloudflared` program on the host PC and make sure the `cloudflared` command is available in your terminal:
+
+- [Windows downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+- [macOS and Linux installation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+
+Then start the desktop host with the public option:
+
+```sh
+python3 watch.py --public
+```
+
+On Windows, use `py watch.py --public` if `python3` is not the Python launcher. The app starts its local theater and opens a Cloudflare Quick Tunnel; when the secure public URL appears, the desktop guest link updates automatically. Share that HTTPS URL, the current seat key, and the guest password only with the friends you invite. No router port forwarding or public IP configuration is needed.
+
+The public link is temporary and changes on each run. Keep the host app open and the PC awake and connected to the internet for the entire screening. Closing the app stops the tunnel and server. Without `--public`, the app stays local; this avoids exposing the theater to the internet unintentionally. If `cloudflared` is missing or cannot connect, the desktop terminal reports the problem and the local theater remains available.
+
+Quick Tunnels are a convenience for small, temporary screenings, not a permanent hosting service. Internet traffic, including video, passes through Cloudflare. Large uploads may be subject to Cloudflare limits; selecting the movie from the host PC avoids uploading the video through the guest browser. The shared guest password is not an individual account credential, so do not post the URL, seat key, or password publicly.
 
 The host terminal accepts `close theater <seconds>`, `restart theater`, `cancel movie`, `pause movie`, and `play movie`. Guests can upload a video, set its displayed title, chat, and control shared play/pause. Supported video extensions are MP4, WebM, OGG, MOV, and M4V; uploads are capped at 3 GB.
 
@@ -26,11 +45,11 @@ Cloud hosting currently runs one service instance. The room's seats, chat, playb
 
 ## Network and privacy
 
-The displayed URL uses the computer's private LAN address. It works for devices on the same local network. To reach friends over the internet, the host must separately configure a trusted HTTPS tunnel or HTTPS reverse proxy; router forwarding alone does not make the private address public and would expose credentials and video over unencrypted HTTP. The app does not create or manage a public tunnel.
+The normal displayed URL uses the computer's private LAN address and works only on the same local network. The `--public` option creates a temporary HTTPS tunnel through Cloudflare. Do not share the local `http://` link over the public internet.
 
-Render serves the cloud URL over HTTPS automatically. For local hosting, run a trusted HTTPS tunnel or reverse proxy that forwards to the app's local HTTP port, then launch with `PRJ_PUBLIC_URL=https://your-tunnel.example python3 watch.py` so the desktop displays the HTTPS address. Do not share the local `http://` link over the public internet.
+Render serves the cloud URL over HTTPS automatically. For a permanent custom domain on your PC, configure a trusted HTTPS tunnel or reverse proxy to forward to the app's local HTTP port, then set `PRJ_PUBLIC_URL=https://your-domain.example` before starting `python3 watch.py`. For a temporary public URL, use `python3 watch.py --public` instead.
 
-The seat key changes each time the app starts. The built-in password is verified with PBKDF2-HMAC-SHA256; only its salted digest is stored in the source. Use this shared room only with people you trust. The offline browser screen is available after a guest has visited while the server is reachable; movie playback itself requires the host server.
+The seat key changes each time the app starts. The built-in password is verified with PBKDF2-HMAC-SHA256; only its salted digest is stored in the source. Use this shared room only with people you trust. The browser clients poll for shared chat and playback state about every 1.5 seconds; movie playback itself requires the host server.
 
 ## Tests
 
