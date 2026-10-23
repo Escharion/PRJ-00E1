@@ -94,6 +94,42 @@ def local_ip_address() -> str:
 		connection.close()
 
 
+def external_media_directory(platform: str | None = None) -> str | None:
+	"""Find a mounted removable-volume location for the desktop movie picker."""
+	platform = platform or sys.platform
+	if platform.startswith("linux"):
+		username = Path.home().name
+		roots = [
+			Path("/media") / username,
+			Path("/run/media") / username,
+			Path("/mnt"),
+		]
+	elif platform == "darwin":
+		roots = [Path("/Volumes")]
+	else:
+		return None
+
+	mounts: list[Path] = []
+	for root in roots:
+		try:
+			if root.is_mount():
+				mounts.append(root)
+				continue
+			mounts.extend(
+				child for child in root.iterdir()
+				if child.is_dir() and child.is_mount()
+			)
+		except OSError:
+			continue
+	if not mounts:
+		return None
+
+	for root in roots:
+		if sum(mount.parent == root for mount in mounts) > 1:
+			return str(root)
+	return str(mounts[0])
+
+
 class TheaterState:
 	"""Protect shared room state so desktop and browser threads stay consistent."""
 
@@ -955,10 +991,14 @@ class HostApp:
 
 	def _choose_movie(self) -> None:
 		"""Select a local movie and make it available to every browser guest."""
-		selected = filedialog.askopenfilename(
-			title="Choose a movie",
-			filetypes=[("Video files", "*.mp4 *.webm *.ogg *.mov *.m4v"), ("All files", "*.*")],
-		)
+		options: dict[str, object] = {
+			"title": "Choose a movie",
+			"filetypes": [("Video files", "*.mp4 *.webm *.ogg *.mov *.m4v"), ("All files", "*.*")],
+		}
+		external_directory = external_media_directory()
+		if external_directory is not None:
+			options["initialdir"] = external_directory
+		selected = filedialog.askopenfilename(**options)
 		if not selected:
 			return
 		movie_path = Path(selected)

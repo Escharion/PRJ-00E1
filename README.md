@@ -33,7 +33,7 @@ Quick Tunnels are a convenience for small, temporary screenings, not a permanent
 
 The host terminal accepts `close theater <seconds>`, `restart theater`, `cancel movie`, `pause movie`, and `play movie`. Guests can upload a video, set its displayed title, chat, and control shared play/pause. Supported video extensions are MP4, WebM, OGG, MOV, and M4V; uploads are capped at 3 GB.
 
-Uploading a movie starts shared playback automatically. The local Tkinter screen decodes and displays frames inside its own window; install `ffmpeg`, Pillow, and `ffplay` to enable desktop video and audio. Audio uses an audio-only process (`-nodisp`), not a separate video player. Browser previews start muted for autoplay compatibility and have an Unmute control.
+Uploading a movie starts shared playback automatically. The desktop movie picker checks common mounted-volume locations on Linux (`/media`, `/run/media`, and `/mnt`) and macOS (`/Volumes`) each time it opens, starting in a detected external drive when available. On Windows, use the file picker’s normal drive list. You can still browse to any other folder. Keep the drive connected throughout the screening so the host can continue reading the movie. The local Tkinter screen decodes and displays frames inside its own window; install `ffmpeg`, Pillow, and `ffplay` to enable desktop video and audio. Audio uses an audio-only process (`-nodisp`), not a separate video player. Browser previews start muted for autoplay compatibility and have an Unmute control.
 
 ## Cloud hosting on Render
 

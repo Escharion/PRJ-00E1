@@ -18,6 +18,7 @@ from watch import (
     TheaterServer,
     TheaterState,
     cloudflare_url_from_line,
+    external_media_directory,
     guest_url_for,
     read_exactly,
 )
@@ -75,6 +76,39 @@ class TheaterStateTests(unittest.TestCase):
                 guest_url_for(8765, False, ""),
                 "http://192.0.2.10:8765/",
             )
+
+    def test_external_media_directory_detects_mounted_linux_volumes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            volume = Path(folder) / "USB_DISK"
+            volume.mkdir()
+
+            def mounted_volumes(directory: Path) -> object:
+                if directory == Path("/media/guest"):
+                    return iter([volume])
+                raise OSError("No mounted volumes here")
+
+            with (
+                patch.object(Path, "home", return_value=Path("/home/guest")),
+                patch.object(Path, "iterdir", autospec=True, side_effect=mounted_volumes),
+                patch.object(Path, "is_mount", autospec=True, side_effect=lambda path: path == volume),
+            ):
+                self.assertEqual(external_media_directory("linux"), str(volume))
+
+    def test_movie_picker_opens_at_detected_external_volume(self) -> None:
+        app = watch.HostApp.__new__(watch.HostApp)
+        app.title_entry = Mock()
+        app.title_entry.get.return_value = "Movie title"
+        app.state = Mock()
+        movie_path = "/media/guest/USB_DISK/movie.mp4"
+
+        with (
+            patch.object(watch, "external_media_directory", return_value="/media/guest/USB_DISK"),
+            patch.object(watch.filedialog, "askopenfilename", return_value=movie_path) as picker,
+        ):
+            app._choose_movie()
+
+        self.assertEqual(picker.call_args.kwargs["initialdir"], "/media/guest/USB_DISK")
+        app.state.set_movie.assert_called_once_with(Path(movie_path), "movie")
 
     def test_waiting_guest_is_promoted_when_a_seat_opens(self) -> None:
         guests = [self.state.add_guest(f"Guest {index}") for index in range(MAX_SEATS + 1)]
