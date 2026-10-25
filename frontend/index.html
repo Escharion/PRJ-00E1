@@ -57,7 +57,7 @@
         <div class="field"><label for="password">Theater password</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter the shared password" required></div>
         <button class="enter-button" id="enter-button" type="submit">Enter Theater</button>
         <div class="form-error" id="login-error" role="status"></div>
-        <div class="login-foot">The seat key rotates each time the host launches PRJ-00E1. <strong>Connections are limited to 11 guests.</strong></div>
+        <div class="login-foot">Use the seat key provided by the host. <strong>Connections are limited to 11 guests.</strong></div>
       </form>
     </section>
 
@@ -69,7 +69,7 @@
 
       <section class="stage" aria-label="Shared theater screen">
         <div class="screen" id="screen">
-          <video id="movie" autoplay muted playsinline preload="metadata" class="hidden"></video>
+          <video id="movie" autoplay muted playsinline webkit-playsinline preload="metadata" class="hidden"></video>
           <div class="close-overlay hidden" id="close-overlay"><strong id="closing-message"></strong><span id="closing-detail"></span></div>
           <div class="screen-empty" id="screen-empty"><div class="screen-icon" aria-hidden="true">▶</div><div class="screen-message" id="screen-message">YOUR SCREENING STARTS HERE</div><div class="screen-hint" id="screen-hint">Choose a video to share with the room</div></div>
         </div>
@@ -115,9 +115,14 @@
       uploadProgress: $("#upload-progress"), uploadBar: $("#upload-bar"),
       offlineView: $("#offline-view"), notice: $("#notice"),
     };
-    let sessionToken = sessionStorage.getItem("prj-seat-token") || "";
+    let sessionToken = localStorage.getItem("prj-seat-token") || "";
     let currentMovie = "";
     let currentPlayback = null;
+    let pendingMoviePosition = null;
+    let lastHardSyncAt = 0;
+    const HARD_SYNC_THRESHOLD_SECONDS = 10;
+    const HARD_SYNC_COOLDOWN_MS = 20000;
+    let endPausePending = false;
     let noticeTimer;
     let pollTimer;
     let syncInProgress = false;
@@ -128,6 +133,58 @@
     ];
     let backgroundVideoIndex = 0;
     let backgroundLoadAttempts = 0;
+    elements.movie.controls = window.matchMedia("(pointer: coarse)").matches
+      || window.matchMedia("(max-width: 620px)").matches;
+
+    elements.movie.addEventListener("loadedmetadata", () => {
+      let reachedEnd = false;
+      if (pendingMoviePosition !== null) {
+        reachedEnd = applyMoviePosition(pendingMoviePosition);
+        pendingMoviePosition = null;
+      }
+      if (currentPlayback && !reachedEnd) startMoviePlayback();
+    });
+    elements.movie.addEventListener("ended", pauseSharedPlaybackAtEnd);
+    elements.movie.addEventListener("error", () => {
+      if (!elements.movie.currentSrc) return;
+      const unsupported = elements.movie.error?.code === MediaError.MEDIA_ERR_DECODE
+        || elements.movie.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+      showNotice(unsupported
+        ? "This video codec is not supported by your phone's browser. Try an H.264 MP4."
+        : "The video could not load. Check your connection and try again.");
+    });
+
+    function startMoviePlayback() {
+      let reachedEnd = false;
+      if (pendingMoviePosition !== null && elements.movie.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        reachedEnd = applyMoviePosition(pendingMoviePosition);
+        pendingMoviePosition = null;
+      }
+      if (reachedEnd) return;
+      elements.movie.play().catch(() => {
+        elements.playButton.textContent = "START PLAYER";
+        showNotice("Tap START PLAYER or the video controls to play on this device.");
+      });
+    }
+
+    function applyMoviePosition(position) {
+      const requested = Number.isFinite(position) ? Math.max(0, position) : 0;
+      const duration = elements.movie.duration;
+      const reachedEnd = Number.isFinite(duration) && duration > 0 && requested >= duration;
+      elements.movie.currentTime = reachedEnd ? Math.max(0, duration - 0.05) : requested;
+      if (reachedEnd && currentPlayback) pauseSharedPlaybackAtEnd();
+      return reachedEnd;
+    }
+
+    function pauseSharedPlaybackAtEnd() {
+      if (!currentPlayback || endPausePending || !sessionToken) return;
+      endPausePending = true;
+      api("/api/control", {action:"pause"})
+        .catch((error) => {
+          endPausePending = false;
+          showNotice(error.message);
+        });
+    }
 
     function playNextBackgroundVideo() {
       if (backgroundLoadAttempts >= backgroundVideos.length) return;
@@ -170,6 +227,7 @@
     }
 
     async function poll() {
+      if (document.hidden) return;
       try {
         const response = await fetch("/api/state", {
           headers: {"X-Session-Token": sessionToken}, cache: "no-store",
@@ -186,9 +244,28 @@
         elements.connection.classList.add("down");
         elements.offlineView.classList.remove("hidden");
       } finally {
-        pollTimer = setTimeout(poll, 1500);
+        if (!document.hidden) pollTimer = setTimeout(poll, 1500);
       }
     }
+
+    document.addEventListener("visibilitychange", () => {
+      clearTimeout(pollTimer);
+      if (!document.hidden) poll();
+    });
+
+    function releaseGuestSeat() {
+      if (!sessionToken) return;
+      const token = sessionToken;
+      sessionToken = "";
+      localStorage.removeItem("prj-seat-token");
+      navigator.sendBeacon(
+        "/api/leave",
+        new Blob([JSON.stringify({token})], {type: "application/json"}),
+      );
+    }
+
+    window.addEventListener("pagehide", releaseGuestSeat);
+    window.addEventListener("beforeunload", releaseGuestSeat);
 
     function renderState(state) {
       if (state.closed) {
@@ -210,7 +287,7 @@
           }, 85);
           setTimeout(() => {
             sessionToken = "";
-            sessionStorage.removeItem("prj-seat-token");
+            localStorage.removeItem("prj-seat-token");
             elements.theaterView.classList.add("hidden");
             elements.loginView.classList.remove("hidden");
             elements.loginBackdrop.classList.remove("hidden");
@@ -232,7 +309,7 @@
       }
       if (!state.admitted) {
         sessionToken = "";
-        sessionStorage.removeItem("prj-seat-token");
+        localStorage.removeItem("prj-seat-token");
         elements.theaterView.classList.add("hidden");
         elements.loginView.classList.remove("hidden");
         elements.loginBackdrop.classList.remove("hidden");
@@ -279,14 +356,18 @@
         elements.movieTitle.textContent = state.movie || "NO MOVIE SELECTED";
         elements.screenEmpty.classList.toggle("hidden", Boolean(state.movie));
         elements.movie.classList.toggle("hidden", !state.movie);
+        endPausePending = false;
         if (state.movie) {
           elements.movie.src = `/media?refresh=${Date.now()}`;
           elements.movie.load();
           elements.movie.muted = true;
+          pendingMoviePosition = state.playing ? state.position : 0;
           currentPlayback = null;
+          lastHardSyncAt = 0;
         } else {
           elements.movie.removeAttribute("src");
           elements.movie.load();
+          pendingMoviePosition = null;
           elements.movie.playbackRate = 1;
         }
       }
@@ -299,20 +380,36 @@
       if (playbackChanged) {
         currentPlayback = state.playing;
         if (state.playing) {
-          elements.movie.currentTime = state.position;
-          elements.movie.play().catch(() => {
-          elements.playButton.textContent = "START PLAYER";
-          showNotice("Tap START PLAYER to begin video in this browser.");
-          });
+          endPausePending = false;
+          pendingMoviePosition = state.position;
+          if (elements.movie.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            startMoviePlayback();
+          }
         } else {
           elements.movie.pause();
           elements.movie.playbackRate = 1;
-          if (Number.isFinite(state.position)) elements.movie.currentTime = state.position;
+          pendingMoviePosition = Number.isFinite(state.position) ? state.position : 0;
+          if (elements.movie.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            applyMoviePosition(pendingMoviePosition);
+            pendingMoviePosition = null;
+          }
         }
       }
-      if (state.playing && !playbackChanged && Number.isFinite(state.position)) {
+      if (state.playing && !playbackChanged && !elements.movie.paused
+          && !elements.movie.seeking && Number.isFinite(state.position)
+          && elements.movie.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
         const drift = state.position - elements.movie.currentTime;
-        elements.movie.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.02));
+        if (applyMoviePositionForSync(state.position)) {
+          elements.movie.playbackRate = 1;
+        } else if (Math.abs(drift) > HARD_SYNC_THRESHOLD_SECONDS
+            && (lastHardSyncAt === 0
+              || performance.now() - lastHardSyncAt >= HARD_SYNC_COOLDOWN_MS)) {
+          applyMoviePosition(state.position);
+          elements.movie.playbackRate = 1;
+          lastHardSyncAt = performance.now();
+        } else if (Math.abs(drift) <= HARD_SYNC_THRESHOLD_SECONDS) {
+          elements.movie.playbackRate = Math.max(0.95, Math.min(1.05, 1 + drift * 0.025));
+        }
       }
       if (state.close_countdown === null) {
         elements.screenMessage.textContent = "NOW SHOWING";
@@ -325,6 +422,20 @@
       elements.muteButton.setAttribute("aria-label", elements.movie.muted ? "Turn sound on" : "Mute movie");
     }
 
+    function applyMoviePositionForSync(position) {
+      const duration = elements.movie.duration;
+      if (Number.isFinite(duration) && duration > 0 && position >= duration) {
+        const endPosition = Math.max(0, duration - 0.05);
+        if (Math.abs(elements.movie.currentTime - endPosition) > 0.2
+            && elements.movie.currentTime < endPosition) {
+          applyMoviePosition(position);
+        }
+        pauseSharedPlaybackAtEnd();
+        return true;
+      }
+      return false;
+    }
+
     elements.loginForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       elements.loginError.textContent = "";
@@ -335,7 +446,7 @@
         const result = await api("/api/login", Object.fromEntries(form.entries()));
         sessionToken = result.token;
         closedTransition = false;
-        sessionStorage.setItem("prj-seat-token", sessionToken);
+        localStorage.setItem("prj-seat-token", sessionToken);
         elements.loginForm.reset();
         showNotice(result.admitted ? "Seat confirmed. Welcome to the theater." : "The theater is full. You are in the waiting room.");
         await pollOnce();
@@ -366,7 +477,7 @@
 
     elements.playButton.addEventListener("click", async () => {
       if (currentPlayback && elements.movie.paused) {
-        elements.movie.play().catch(() => showNotice("The movie could not start in this browser."));
+        startMoviePlayback();
         return;
       }
       const shouldPause = currentPlayback;
@@ -422,7 +533,7 @@
     elements.leaveButton.addEventListener("click", async () => {
       const token = sessionToken;
       sessionToken = "";
-      sessionStorage.removeItem("prj-seat-token");
+      localStorage.removeItem("prj-seat-token");
       try { await fetch("/api/leave", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})}); } catch {}
       elements.theaterView.classList.add("hidden");
       elements.loginView.classList.remove("hidden");

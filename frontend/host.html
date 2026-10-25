@@ -40,6 +40,63 @@
     let lastMessage = "";
     let previewMovie = "";
     let previewPlaying = null;
+    let pendingPreviewPosition = null;
+    let endPausePending = false;
+    const preview = $("#preview");
+
+    preview.addEventListener("loadedmetadata", () => {
+      let reachedEnd = false;
+      if (pendingPreviewPosition !== null) {
+        reachedEnd = applyPreviewPosition(pendingPreviewPosition);
+        pendingPreviewPosition = null;
+      }
+      if (previewPlaying && preview.paused && !reachedEnd) {
+        preview.play().catch(() => { $("#status").textContent = "Host preview could not start."; });
+      }
+    });
+    preview.addEventListener("ended", pauseSharedPlaybackAtEnd);
+
+    preview.addEventListener("error", () => {
+      if (!preview.currentSrc) return;
+      const unsupported = preview.error?.code === MediaError.MEDIA_ERR_DECODE
+        || preview.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+      $("#status").textContent = unsupported
+        ? "Host preview codec is not supported by this browser. Try an H.264 MP4."
+        : "Host preview could not load. Check the connection and host session.";
+    });
+
+    function applyPreviewPosition(position) {
+      const requested = Number.isFinite(position) ? Math.max(0, position) : 0;
+      const duration = preview.duration;
+      const reachedEnd = Number.isFinite(duration) && duration > 0 && requested >= duration;
+      preview.currentTime = reachedEnd ? Math.max(0, duration - 0.05) : requested;
+      if (reachedEnd && previewPlaying) pauseSharedPlaybackAtEnd();
+      return reachedEnd;
+    }
+
+    function pauseSharedPlaybackAtEnd() {
+      if (!previewPlaying || endPausePending) return;
+      endPausePending = true;
+      request("/api/host/control", {action:"pause"})
+        .catch((error) => {
+          endPausePending = false;
+          $("#status").textContent = error.message;
+        });
+    }
+
+    function applyPreviewPositionForSync(position) {
+      const duration = preview.duration;
+      if (Number.isFinite(duration) && duration > 0 && position >= duration) {
+        const endPosition = Math.max(0, duration - 0.05);
+        if (Math.abs(preview.currentTime - endPosition) > 0.2
+            && preview.currentTime < endPosition) {
+          applyPreviewPosition(position);
+        }
+        pauseSharedPlaybackAtEnd();
+        return true;
+      }
+      return false;
+    }
 
     async function request(path, body, method = "POST") {
       const headers = {"X-Host-Token": hostToken};
@@ -75,26 +132,41 @@
         $("#mute-preview").textContent = $("#preview").muted ? "UNMUTE" : "MUTE";
         $("#cancel").disabled = !state.movie;
         $("#screen-label").textContent = state.close_countdown !== null ? `THEATER CLOSING IN ${state.close_countdown}` : state.movie || (state.closed ? "THEATER IS CLOSED" : "READY FOR SCREENING");
-        const preview = $("#preview");
         if (previewMovie !== state.movie) {
           previewMovie = state.movie;
-          preview.src = state.movie ? `/host-media?refresh=${Date.now()}` : "";
+          endPausePending = false;
+          if (state.movie) preview.src = `/host-media?refresh=${Date.now()}`;
+          else preview.removeAttribute("src");
           preview.load();
           previewPlaying = null;
+          pendingPreviewPosition = state.playing ? state.position : 0;
         }
         if (previewPlaying !== state.playing) {
           previewPlaying = state.playing;
           if (state.playing) {
-            if (preview.readyState >= 1) preview.currentTime = state.position;
-            preview.play().catch(() => { $("#status").textContent = "Host preview could not start."; });
+            endPausePending = false;
+            pendingPreviewPosition = state.position;
+            let reachedEnd = false;
+            if (preview.readyState >= 1) {
+              reachedEnd = applyPreviewPosition(pendingPreviewPosition);
+              pendingPreviewPosition = null;
+            }
+            if (reachedEnd) preview.pause();
+            else preview.play().catch(() => { $("#status").textContent = "Host preview could not start."; });
           } else {
             preview.pause();
             preview.playbackRate = 1;
-            if (preview.readyState >= 1) preview.currentTime = state.position;
+            pendingPreviewPosition = state.position;
+            if (preview.readyState >= 1) {
+              applyPreviewPosition(pendingPreviewPosition);
+              pendingPreviewPosition = null;
+            }
           }
-        } else if (state.playing) {
+        } else if (state.playing && !preview.paused && !preview.seeking
+            && preview.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
           const drift = state.position - preview.currentTime;
-          preview.playbackRate = Math.max(0.96, Math.min(1.04, 1 + drift * 0.02));
+          preview.playbackRate = applyPreviewPositionForSync(state.position)
+            ? 1 : Math.max(0.96, Math.min(1.04, 1 + drift * 0.02));
         }
         const events = state.events || [];
         const eventMarker = events.length ? JSON.stringify(events[events.length - 1]) : "";

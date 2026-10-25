@@ -4,12 +4,13 @@ import hashlib
 import hmac
 
 
-# Keep the shared password out of plaintext; the salt is fixed so this digest
-# can be verified across server restarts while the seat key changes each run.
+# Keep the shared password out of plaintext; the salt and digest are fixed
+# so the configured guest password can be verified across server restarts.
+DEFAULT_SEAT_KEY = "EGESHOME"
 PASSWORD_SALT = b"PRJ-00E1-seat-password-v1"
 PASSWORD_HASH = bytes.fromhex(
-    "5b1d733c47239c7e053d868cce9fabce"
-    "ae302a1b021a96783637eb1b4e9241e2"
+    "19fd57e63deaacf2e1a43749b9c1a478"
+    "737e336b9d7a757fc1dadf14c7b97ca5"
 )
 PASSWORD_ITERATIONS = 310_000
 MAX_USERNAME_LENGTH = 24

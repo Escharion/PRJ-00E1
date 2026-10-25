@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.cookies import CookieError, SimpleCookie
@@ -27,7 +28,6 @@ from urllib.parse import unquote, urlparse
 if TYPE_CHECKING:
 	import tkinter as tk
 	from tkinter import filedialog, messagebox, ttk
-	from PIL import Image, ImageTk
 	tk_widgets_unavailable = False
 else:
 	try:
@@ -39,12 +39,7 @@ else:
 		tk_widgets_unavailable = True
 	else:
 		tk_widgets_unavailable = False
-	try:
-		from PIL import Image, ImageTk
-	except ModuleNotFoundError:
-		Image = ImageTk = None
-
-from backend.user import user_login
+from backend.user import DEFAULT_SEAT_KEY, user_login
 
 
 APP_NAME = "PRJ-00E1"
@@ -52,6 +47,7 @@ PORT = 8765
 MAX_SEATS = 11
 MAX_UPLOAD_BYTES = 3 * 1024 * 1024 * 1024
 HOST_SESSION_SECONDS = 12 * 60 * 60
+GUEST_IDLE_TIMEOUT_SECONDS = 30 * 60
 WEB_ROOT = Path(__file__).resolve().parent / "frontend"
 ASSET_ROOT = Path(__file__).resolve().parent / "asset"
 MEDIA_ROOT = Path(os.environ.get("PRJ_MEDIA_DIR", Path.home() / ".local" / "share" / APP_NAME / "media"))
@@ -80,6 +76,14 @@ def read_exactly(stream: BinaryIO, byte_count: int) -> bytes:
 			break
 		buffer.extend(chunk)
 	return bytes(buffer)
+
+
+def write_ppm_frame(path: Path, frame: bytes, width: int = 640, height: int = 360) -> None:
+	"""Write an RGB frame in the PPM format built into Tk PhotoImage."""
+	expected_size = width * height * 3
+	if len(frame) != expected_size:
+		raise ValueError(f"Expected an RGB frame of {expected_size} bytes, got {len(frame)}.")
+	path.write_bytes(f"P6\n{width} {height}\n255\n".encode("ascii") + frame)
 
 
 def local_ip_address() -> str:
@@ -173,7 +177,7 @@ class TheaterState:
 
 	def _expire_sessions(self) -> None:
 		"""Release seats for browsers that stopped polling the server."""
-		cutoff = time.monotonic() - 20
+		cutoff = time.monotonic() - GUEST_IDLE_TIMEOUT_SECONDS
 		for token in [
 			token for token, session in self.sessions.items()
 			if float(session["last_seen"]) < cutoff
@@ -259,6 +263,24 @@ class TheaterState:
 			raise PermissionError("Join an available theater seat before continuing.")
 		session["last_seen"] = time.monotonic()
 		return session
+
+	def remove_guest(self, username: str) -> int:
+		"""Disconnect every active or waiting session belonging to a username."""
+		normalized_username = " ".join(username.split()).casefold()
+		if not normalized_username:
+			raise ValueError("Enter a username to remove.")
+		with self.lock:
+			removed_tokens = [
+				token for token, session in self.sessions.items()
+				if " ".join(str(session["name"]).split()).casefold() == normalized_username
+			]
+			if not removed_tokens:
+				return 0
+			for token in removed_tokens:
+				self.sessions.pop(token)
+			self._promote_waiting()
+			self.host_log(f"{username.strip()} removed from the theater")
+			return len(removed_tokens)
 
 	def create_host_session(self) -> str:
 		"""Create a time-limited browser session for the cloud host console."""
@@ -446,6 +468,46 @@ class TheaterHandler(BaseHTTPRequestHandler):
 		else:
 			self.send_error(404)
 
+	def do_HEAD(self) -> None:
+		"""Support metadata probes made by mobile and desktop video players."""
+		route = urlparse(self.path).path
+		if route == "/host-media":
+			try:
+				if not self.cloud_mode:
+					self.send_error(404)
+					return
+				self.state.require_host(self._cookie("PRJ_HOST_SESSION"))
+				movie_path = self.state.movie_path
+				if movie_path is None or not movie_path.is_file():
+					self.send_error(404, "No movie is currently available")
+					return
+				self._serve_video(movie_path, head_only=True)
+			except PermissionError as error:
+				self.send_error(403, str(error))
+			return
+		if route.startswith("/assets/"):
+			asset_name = Path(route).name
+			asset_path = ASSET_ROOT / asset_name
+			if asset_name not in BACKGROUND_VIDEOS or not asset_path.is_file():
+				self.send_error(404)
+				return
+			self._serve_video(asset_path, head_only=True)
+			return
+		if route == "/media":
+			token = self.headers.get("X-Session-Token", "") or self._cookie("PRJ_SESSION")
+			try:
+				with self.state.lock:
+					self.state.require_active(token)
+					movie_path = self.state.movie_path
+				if movie_path is None or not movie_path.is_file():
+					self.send_error(404, "No movie is currently available")
+					return
+				self._serve_video(movie_path, head_only=True)
+			except PermissionError as error:
+				self.send_error(403, str(error))
+			return
+		self.send_error(404)
+
 	def do_POST(self) -> None:
 		"""Handle login, chat, playback controls, and streaming file upload."""
 		route = urlparse(self.path).path
@@ -527,22 +589,34 @@ class TheaterHandler(BaseHTTPRequestHandler):
 		try:
 			body = self._read_json()
 			self.state.require_host(self.headers.get("X-Host-Token", ""))
-			command = str(body.get("command", "")).strip().lower().split()
-			if command[:2] == ["close", "theater"] and len(command) == 3:
+			raw_command = str(body.get("command", "")).strip()
+			command = raw_command.split()
+			normalized_command = [part.casefold() for part in command]
+			if normalized_command[:2] == ["close", "theater"] and len(command) == 3:
 				seconds = int(command[2])
 				if not 1 <= seconds <= 3600:
 					raise ValueError("Countdown must be between 1 and 3600 seconds.")
 				self.state.close_after(seconds)
-			elif command == ["restart", "theater"]:
+			elif normalized_command == ["restart", "theater"]:
 				self.state.control("restart")
-			elif command == ["cancel", "movie"]:
+			elif normalized_command == ["cancel", "movie"]:
 				self.state.control("cancel")
-			elif command == ["pause", "movie"]:
+			elif normalized_command == ["pause", "movie"]:
 				self.state.control("pause")
-			elif command == ["play", "movie"]:
+			elif normalized_command == ["play", "movie"]:
 				self.state.control("play")
+			elif normalized_command[:2] == ["remove", "-user"]:
+				username = raw_command.split(maxsplit=2)[2] if len(command) >= 3 else ""
+				removed_count = self.state.remove_guest(username)
+				if not removed_count:
+					raise ValueError(f"No current guest session found for {username.strip() or 'that username'}.")
+			elif normalized_command == ["reinit", "-m", "--ser"]:
+				raise ValueError("reinit -m --ser is available only in the desktop host console.")
 			else:
-				raise ValueError("Use: close theater <seconds>, restart theater, cancel movie, pause movie, play movie")
+				raise ValueError(
+					"Use: close theater <seconds>, restart theater, cancel movie, pause movie, "
+					"play movie, remove -user <username>"
+				)
 			self._send_json({"ok": True})
 		except (ValueError, PermissionError, json.JSONDecodeError) as error:
 			self._send_json({"error": str(error)}, 403)
@@ -657,7 +731,7 @@ class TheaterHandler(BaseHTTPRequestHandler):
 		self.end_headers()
 		self.wfile.write(payload)
 
-	def _serve_video(self, path: Path) -> None:
+	def _serve_video(self, path: Path, head_only: bool = False) -> None:
 		"""Support browser seeking using a single HTTP byte range."""
 		size = path.stat().st_size
 		start, end, status = 0, size - 1, 200
@@ -665,22 +739,34 @@ class TheaterHandler(BaseHTTPRequestHandler):
 		if requested_range.startswith("bytes="):
 			try:
 				first, last = requested_range[6:].split("-", 1)
-				start = int(first) if first else max(0, size - int(last))
-				end = min(int(last), size - 1) if last else size - 1
-				if start > end or start >= size:
+				if not first and last:
+					suffix_length = int(last)
+					if suffix_length <= 0:
+						raise ValueError
+					start = max(0, size - suffix_length)
+				else:
+					start = int(first)
+					end = min(int(last), size - 1) if last else size - 1
+				if start < 0 or start > end or start >= size:
 					raise ValueError
 				status = 206
 			except ValueError:
-				self.send_error(416, "Requested range is not satisfiable")
+				self.send_response(416)
+				self.send_header("Content-Range", f"bytes */{size}")
+				self.send_header("Content-Length", "0")
+				self.end_headers()
 				return
 
 		self.send_response(status)
 		self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "video/mp4")
 		self.send_header("Accept-Ranges", "bytes")
 		self.send_header("Content-Length", str(end - start + 1))
+		self.send_header("Cache-Control", "no-store")
 		if status == 206:
 			self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
 		self.end_headers()
+		if head_only:
+			return
 		with path.open("rb") as movie_file:
 			movie_file.seek(start)
 			remaining = end - start + 1
@@ -717,14 +803,20 @@ class HostApp:
 		self.preview_process: subprocess.Popen[bytes] | None = None
 		self.audio_process: subprocess.Popen[bytes] | None = None
 		self.preview_movie_path: Path | None = None
+		self.preview_frame_path: Path | None = None
 		self.preview_was_playing = False
 		self.preview_image: object | None = None
 		self.preview_after_id: str | None = None
 		self.preview_frames: queue.Queue[bytes] = queue.Queue(maxsize=2)
 		self.preview_reader: threading.Thread | None = None
+		self.preview_stderr_reader: threading.Thread | None = None
+		self.preview_error_lines: deque[str] = deque(maxlen=5)
 		self.preview_eof = threading.Event()
-		self.public_link_updates: queue.Queue[tuple[str, str]] = queue.Queue()
+		self.public_link_updates: queue.Queue[tuple[int, str, str]] = queue.Queue()
 		self.tunnel_process: subprocess.Popen[str] | None = None
+		self.tunnel_generation = 0
+		self.public_mode = False
+		self.configured_external_url = ""
 		self.root.title(f"{APP_NAME} | Theater Host")
 		self.root.geometry("1200x760")
 		self.root.minsize(920, 620)
@@ -808,7 +900,7 @@ class HostApp:
 		self.link_label = tk.Label(panel, text=f"GUEST LINK  {self.guest_url}", bg="#0c1625", fg="#7dc6ff", font=("TkFixedFont", 9), cursor="hand2", wraplength=520, justify="left")
 		self.link_label.grid(row=4, column=0, sticky="ew", padx=14, pady=(14, 3))
 		self.link_label.bind("<Button-1>", lambda _event: self._copy_text(self.guest_url))
-		self.key_label = tk.Label(panel, text=f"SEAT KEY  {self.state.seat_key}    PASSWORD  hello_hello3_whatch_with me", bg="#0c1625", fg="#a8b9ce", font=("TkFixedFont", 9), wraplength=520, justify="left")
+		self.key_label = tk.Label(panel, text=f"SEAT KEY  {self.state.seat_key}    PASSWORD  FANTASY000", bg="#0c1625", fg="#a8b9ce", font=("TkFixedFont", 9), wraplength=520, justify="left")
 		self.key_label.grid(row=5, column=0, sticky="ew", padx=14, pady=(0, 5))
 		self.live_label = tk.Label(panel, text="● LIVE STREAMING", bg="#0c1625", fg="#20df83", font=("TkDefaultFont", 11, "bold"))
 		self.live_label.grid(row=6, column=0, pady=(4, 12))
@@ -855,15 +947,17 @@ class HostApp:
 			return
 
 		self.tunnel_process = process
+		self.tunnel_generation += 1
+		generation = self.tunnel_generation
 		self.link_label.configure(text="PUBLIC GUEST LINK  Waiting for Cloudflare...")
 		threading.Thread(
 			target=self._read_tunnel_output,
-			args=(process,),
+			args=(process, generation),
 			name="cloudflare-tunnel-output",
 			daemon=True,
 		).start()
 
-	def _read_tunnel_output(self, process: subprocess.Popen[str]) -> None:
+	def _read_tunnel_output(self, process: subprocess.Popen[str], generation: int) -> None:
 		"""Find the public URL while continuing to drain tunnel logs."""
 		output_tail: deque[str] = deque(maxlen=6)
 		public_url_found = False
@@ -871,7 +965,7 @@ class HostApp:
 			for line in process.stdout:
 				public_url = cloudflare_url_from_line(line)
 				if public_url and not public_url_found:
-					self.public_link_updates.put(("url", public_url))
+					self.public_link_updates.put((generation, "url", public_url))
 					public_url_found = True
 				elif line.strip():
 					output_tail.append(line.strip())
@@ -882,23 +976,26 @@ class HostApp:
 			message = "Cloudflare Tunnel stopped before creating a public link."
 			if details:
 				message = f"{message} {details}"
-			self.public_link_updates.put(("error", message))
+			self.public_link_updates.put((generation, "error", message))
 		elif process.returncode is not None:
 			self.public_link_updates.put(
-				("error", "Cloudflare Tunnel stopped; the public link is no longer available.")
+				(generation, "error", "Cloudflare Tunnel stopped; the public link is no longer available.")
 			)
 
 	def _refresh_public_link(self) -> None:
 		"""Apply tunnel status updates on the Tkinter UI thread."""
 		while True:
 			try:
-				status, value = self.public_link_updates.get_nowait()
+				generation, status, value = self.public_link_updates.get_nowait()
 			except queue.Empty:
 				return
+			if generation != self.tunnel_generation:
+				continue
 			if status == "url":
 				self.guest_url = f"{value}/"
 				self.link_label.configure(text=f"GUEST LINK  {self.guest_url}")
 				self._append_terminal(f"Public guest link ready: {self.guest_url}")
+				print(f"Public guest link ready: {self.guest_url}", flush=True)
 			else:
 				self.guest_url = self.local_guest_url
 				self.link_label.configure(text=f"LOCAL GUEST LINK  {self.guest_url}")
@@ -951,26 +1048,82 @@ class HostApp:
 		self.command_history.append(command)
 		self.history_index = len(self.command_history)
 		self._append_terminal(f"> {command}")
-		parts = command.lower().split()
+		parts = command.split()
+		normalized_parts = [part.casefold() for part in parts]
 		try:
-			if parts[:2] == ["close", "theater"] and len(parts) == 3:
+			if normalized_parts[:2] == ["close", "theater"] and len(parts) == 3:
 				seconds = int(parts[2])
 				if not 1 <= seconds <= 3600:
 					raise ValueError("Countdown must be between 1 and 3600 seconds.")
 				self.state.close_after(seconds)
-			elif parts == ["restart", "theater"]:
+			elif normalized_parts == ["restart", "theater"]:
 				self.state.control("restart")
-			elif parts == ["cancel", "movie"]:
+			elif normalized_parts == ["cancel", "movie"]:
 				self.state.control("cancel")
-			elif parts == ["pause", "movie"]:
+			elif normalized_parts == ["pause", "movie"]:
 				self.state.control("pause")
-			elif parts == ["play", "movie"]:
+			elif normalized_parts == ["play", "movie"]:
 				self.state.control("play")
+			elif normalized_parts[:2] == ["remove", "-user"]:
+				username = command.split(maxsplit=2)[2] if len(parts) >= 3 else ""
+				removed_count = self.state.remove_guest(username)
+				if removed_count:
+					self._append_terminal(
+						f"Removed {username.strip()} ({removed_count} session"
+						f"{'s' if removed_count != 1 else ''})."
+					)
+				else:
+					self._append_terminal(
+						f"No current guest session found for {username.strip() or 'that username'}."
+					)
+			elif normalized_parts == ["reinit", "-m", "--ser"]:
+				self._restart_server_with_new_tunnel()
 			else:
-				self._append_terminal("Use: close theater <seconds>, restart theater, cancel movie, pause movie, play movie")
+				self._append_terminal(
+					"Use: close theater <seconds>, restart theater, cancel movie, pause movie, "
+					"play movie, remove -user <username>, reinit -m --ser"
+				)
 		except (ValueError, OSError) as error:
 			self._append_terminal(str(error))
 		return "break"
+
+	def _restart_server_with_new_tunnel(self) -> None:
+		"""Restart the desktop HTTP server and recreate its optional Quick Tunnel."""
+		old_server = self.server
+		port = old_server.server_port
+		handler = old_server.RequestHandlerClass
+		self._stop_public_tunnel()
+		old_server.shutdown()
+		old_server.server_close()
+		server_thread = self.server_thread
+		if server_thread.is_alive():
+			server_thread.join()
+
+		self.state.control("restart")
+		try:
+			try:
+				server = TheaterServer(("0.0.0.0", port), handler)
+			except OSError:
+				port = find_available_port()
+				server = TheaterServer(("0.0.0.0", port), handler)
+			self.server = server
+			self.server_thread = threading.Thread(
+				target=server.serve_forever, name="theater-http", daemon=True
+			)
+			self.server_thread.start()
+		except OSError as error:
+			raise OSError(
+				"The theater server could not restart; no guest link is currently available."
+			) from error
+
+		self.local_guest_url = guest_url_for(port, False, self.configured_external_url)
+		self.guest_url = self.local_guest_url
+		self.link_label.configure(text=f"LOCAL GUEST LINK  {self.guest_url}")
+		self._append_terminal("Theater server restarted; existing guests were signed out.")
+		if self.public_mode and not self.configured_external_url:
+			self.start_public_tunnel(port)
+		elif self.configured_external_url:
+			self._append_terminal(f"Using configured public URL: {self.guest_url}")
 
 	def _history_up(self, _event: tk.Event) -> str:
 		"""Recall the previous terminal command with the up arrow."""
@@ -1073,11 +1226,17 @@ class HostApp:
 		"""Decode movie frames into the Tkinter screen while shared playback runs."""
 		self._stop_local_preview()
 		decoder = shutil.which("ffmpeg")
-		if decoder is None or Image is None or ImageTk is None:
-			self._append_terminal("Install ffmpeg and Pillow to show movie frames inside the desktop screen.")
+		if decoder is None:
+			self._append_terminal(
+				"Desktop video preview is unavailable because the ffmpeg executable is not on PATH. "
+				"The Tkinter preview uses built-in Python/Tk libraries and does not require Pillow."
+			)
 			self.preview_movie_path = movie_path
 			return
 		try:
+			frame_fd, frame_filename = tempfile.mkstemp(prefix="prj-00e1-preview-", suffix=".ppm")
+			os.close(frame_fd)
+			self.preview_frame_path = Path(frame_filename)
 			self.preview_process = subprocess.Popen(
 				[
 					decoder, "-nostdin", "-hide_banner", "-loglevel", "error", "-re", "-ss",
@@ -1087,10 +1246,11 @@ class HostApp:
 				],
 				stdin=subprocess.DEVNULL,
 				stdout=subprocess.PIPE,
-				stderr=subprocess.DEVNULL,
+				stderr=subprocess.PIPE,
 				bufsize=0,
 			)
 			self.preview_movie_path = movie_path
+			self.preview_error_lines.clear()
 			self.preview_frames = queue.Queue(maxsize=2)
 			self.preview_eof.clear()
 			self.preview_reader = threading.Thread(
@@ -1099,18 +1259,34 @@ class HostApp:
 				daemon=True,
 			)
 			self.preview_reader.start()
+			self.preview_stderr_reader = threading.Thread(
+				target=self._read_preview_errors,
+				args=(self.preview_process,),
+				name="movie-preview-errors",
+				daemon=True,
+			)
+			self.preview_stderr_reader.start()
 			self.preview_after_id = self.root.after(1, self._render_local_frame)
 			self._start_local_audio(movie_path, position)
 		except OSError as error:
-			self.preview_process = None
+			self._stop_local_preview()
 			self.preview_movie_path = movie_path
 			self._append_terminal(f"Could not decode the movie inside the desktop screen: {error}")
+
+	def _read_preview_errors(self, process: subprocess.Popen[bytes]) -> None:
+		"""Drain FFmpeg diagnostics so decoder failures are visible to the host."""
+		if process.stderr is None:
+			return
+		for line in process.stderr:
+			message = line.decode("utf-8", errors="replace").strip()
+			if message:
+				self.preview_error_lines.append(message)
 
 	def _start_local_audio(self, movie_path: Path, position: float) -> None:
 		"""Play the movie's audio track without opening a separate video window."""
 		player = shutil.which("ffplay")
 		if player is None:
-			self._append_terminal("Install ffplay to hear the movie audio on this desktop.")
+			self._append_terminal("Desktop movie audio is unavailable because ffplay is not on PATH.")
 			return
 		try:
 			self.audio_process = subprocess.Popen(
@@ -1159,13 +1335,25 @@ class HostApp:
 			except queue.Empty:
 				break
 		if frame is not None:
-			image = Image.frombytes("RGB", (640, 360), frame)
-			image.thumbnail((max(320, self.screen.winfo_width()), max(180, self.screen.winfo_height())), Image.Resampling.LANCZOS)
-			self.preview_image = ImageTk.PhotoImage(image)
-			self.preview_label.configure(image=self.preview_image)
-			self.preview_label.image = self.preview_image
-			self.movie_label.configure(text="")
+			try:
+				if self.preview_frame_path is None:
+					raise OSError("The temporary Tk preview frame is not available.")
+				write_ppm_frame(self.preview_frame_path, frame)
+				self.preview_image = tk.PhotoImage(master=self.root, file=str(self.preview_frame_path))
+				self.preview_label.configure(image=self.preview_image)
+				self.preview_label.image = self.preview_image
+				self.movie_label.configure(text="")
+			except (OSError, tk.TclError, ValueError) as error:
+				self._append_terminal(f"Could not render a movie frame in the desktop screen: {error}")
+				if self.state.playing:
+					self.state.control("pause")
+				self._stop_local_preview()
+				return
 		if self.preview_eof.is_set() and process.poll() is not None:
+			if process.returncode and self.preview_error_lines:
+				self._append_terminal(
+					"Desktop video preview stopped: " + " | ".join(self.preview_error_lines)
+				)
 			if self.state.playing:
 				self.state.control("pause")
 			return
@@ -1181,9 +1369,27 @@ class HostApp:
 		self.preview_movie_path = None
 		if process is not None and process.poll() is None:
 			process.terminate()
-		if process is not None and process.stdout is not None:
-			process.stdout.close()
+			try:
+				process.wait(timeout=1)
+			except subprocess.TimeoutExpired:
+				process.kill()
+				process.wait()
+		if process is not None:
+			for stream in (process.stdout, process.stderr):
+				if stream is not None:
+					stream.close()
+		for reader in (self.preview_reader, self.preview_stderr_reader):
+			if reader is not None and reader.is_alive():
+				reader.join(timeout=0.2)
 		self.preview_reader = None
+		self.preview_stderr_reader = None
+		frame_path = self.preview_frame_path
+		self.preview_frame_path = None
+		if frame_path is not None:
+			try:
+				frame_path.unlink(missing_ok=True)
+			except OSError as error:
+				self._append_terminal(f"Could not remove a temporary movie preview frame: {error}")
 		audio_process = self.audio_process
 		self.audio_process = None
 		if audio_process is not None and audio_process.poll() is None:
@@ -1207,7 +1413,9 @@ class HostApp:
 
 	def _stop_public_tunnel(self) -> None:
 		"""Stop the optional internet tunnel with a bounded graceful wait."""
+		self.tunnel_generation += 1
 		process = self.tunnel_process
+		self.tunnel_process = None
 		if process is None or process.poll() is not None:
 			return
 		process.terminate()
@@ -1249,7 +1457,7 @@ def guest_url_for(port: int, cloud_mode: bool, external_url: str) -> str:
 
 def main() -> None:
 	"""Start local Tkinter hosting or the headless cloud web service."""
-	seat_key = secrets.token_urlsafe(6).replace("-", "A").replace("_", "B").upper()
+	seat_key = DEFAULT_SEAT_KEY
 	state = TheaterState(seat_key)
 	cloud_mode = "--cloud" in sys.argv[1:] or os.environ.get("PRJ_MODE", "").lower() == "cloud"
 	public_mode = "--public" in sys.argv[1:]
@@ -1288,6 +1496,9 @@ def main() -> None:
 		root = tk.Tk()
 		app = HostApp(root, state, local_url)
 		app.server = server
+		app.server_thread = server_thread
+		app.public_mode = public_mode
+		app.configured_external_url = external_url
 		if public_mode and not external_url:
 			app.start_public_tunnel(port)
 		elif public_mode:

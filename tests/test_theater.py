@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from backend.user import user_login
+from backend.user import DEFAULT_SEAT_KEY, user_login
 from watch import (
     MAX_SEATS,
     TheaterHandler,
@@ -21,6 +21,7 @@ from watch import (
     external_media_directory,
     guest_url_for,
     read_exactly,
+    write_ppm_frame,
 )
 import watch
 
@@ -30,10 +31,10 @@ class TheaterStateTests(unittest.TestCase):
         self.state = TheaterState("TEST-KEY")
 
     def test_credentials_require_current_key_and_builtin_password(self) -> None:
-        self.assertTrue(user_login("Guest", "TEST-KEY", "hello_hello3_whatch_with me", "TEST-KEY"))
-        self.assertFalse(user_login("Guest", "OLD-KEY", "hello_hello3_whatch_with me", "TEST-KEY"))
-        self.assertFalse(user_login("Guest", "TEST-KEY", "incorrect", "TEST-KEY"))
-        self.assertFalse(user_login("  ", "TEST-KEY", "hello_hello3_whatch_with me", "TEST-KEY"))
+        self.assertTrue(user_login("Guest", DEFAULT_SEAT_KEY, "FANTASY000", DEFAULT_SEAT_KEY))
+        self.assertFalse(user_login("Guest", "OLD-KEY", "FANTASY000", DEFAULT_SEAT_KEY))
+        self.assertFalse(user_login("Guest", DEFAULT_SEAT_KEY, "incorrect", DEFAULT_SEAT_KEY))
+        self.assertFalse(user_login("  ", DEFAULT_SEAT_KEY, "FANTASY000", DEFAULT_SEAT_KEY))
 
     def test_cloudflare_tunnel_url_is_extracted_from_logs(self) -> None:
         self.assertEqual(
@@ -52,7 +53,8 @@ class TheaterStateTests(unittest.TestCase):
         app.public_link_updates = queue.Queue()
         app.link_label = Mock()
         app._append_terminal = Mock()
-        app.public_link_updates.put(("error", "Cloudflare Tunnel stopped."))
+        app.tunnel_generation = 0
+        app.public_link_updates.put((0, "error", "Cloudflare Tunnel stopped."))
 
         app._refresh_public_link()
 
@@ -118,10 +120,103 @@ class TheaterStateTests(unittest.TestCase):
         self.state._promote_waiting()
         self.assertTrue(self.state.sessions[waiting_token]["active"])
 
+    def test_remove_guest_disconnects_matching_sessions_and_promotes_waiting_guest(self) -> None:
+        guests = [self.state.add_guest(f"Guest {index}") for index in range(MAX_SEATS - 1)]
+        duplicate_token, _ = self.state.add_guest(" Alex ")
+        waiting_token, admitted = self.state.add_guest("Waiting")
+        self.assertFalse(admitted)
+        second_alex_token, _ = self.state.add_guest("alex")
+
+        removed_count = self.state.remove_guest("  ALEX ")
+
+        self.assertEqual(removed_count, 2)
+        self.assertNotIn(duplicate_token, self.state.sessions)
+        self.assertNotIn(second_alex_token, self.state.sessions)
+        self.assertTrue(self.state.sessions[waiting_token]["active"])
+        self.assertEqual(self.state.active_count(), MAX_SEATS)
+        self.assertEqual(len(guests), MAX_SEATS - 1)
+
+    def test_remove_guest_returns_zero_for_unknown_username(self) -> None:
+        self.assertEqual(self.state.remove_guest("missing"), 0)
+
+    def test_desktop_reinit_restarts_server_and_starts_new_tunnel(self) -> None:
+        guest_token, _ = self.state.add_guest("Guest")
+        handler = type("RestartTestHandler", (TheaterHandler,), {"state": self.state})
+        old_server = TheaterServer(("127.0.0.1", 0), handler)
+        old_port = old_server.server_port
+        old_thread = threading.Thread(target=old_server.serve_forever, daemon=True)
+        old_thread.start()
+
+        app = watch.HostApp.__new__(watch.HostApp)
+        app.server = old_server
+        app.server_thread = old_thread
+        app.state = self.state
+        app.tunnel_process = None
+        app.tunnel_generation = 0
+        app.public_link_updates = queue.Queue()
+        app.public_mode = True
+        app.configured_external_url = ""
+        app.link_label = Mock()
+        app._append_terminal = Mock()
+        app.start_public_tunnel = Mock()
+
+        try:
+            app._restart_server_with_new_tunnel()
+
+            self.assertIsNot(app.server, old_server)
+            self.assertEqual(app.server.server_port, old_port)
+            self.assertTrue(app.server_thread.is_alive())
+            self.assertNotIn(guest_token, self.state.sessions)
+            app.start_public_tunnel.assert_called_once_with(old_port)
+
+            connection = http.client.HTTPConnection("127.0.0.1", old_port, timeout=2)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            response.read()
+            connection.close()
+        finally:
+            app.server.shutdown()
+            app.server.server_close()
+            app.server_thread.join()
+
+    def test_desktop_command_reinit_dispatches_restart(self) -> None:
+        app = watch.HostApp.__new__(watch.HostApp)
+        app.terminal_input = Mock()
+        app.terminal_input.get.return_value = "reinit -m --ser"
+        app.command_history = []
+        app.history_index = 0
+        app._append_terminal = Mock()
+        app._restart_server_with_new_tunnel = Mock()
+
+        app._run_command()
+
+        app._restart_server_with_new_tunnel.assert_called_once_with()
+
     def test_guest_snapshot_does_not_include_host_terminal_events(self) -> None:
         token, _ = self.state.add_guest("Guest")
         self.assertEqual(self.state.state_for(token)["events"], [])
         self.assertTrue(self.state.state_for()["events"])
+
+    def test_guest_session_survives_mobile_background_pause(self) -> None:
+        token, _ = self.state.add_guest("Guest")
+        self.state.sessions[token]["last_seen"] = (
+            time.monotonic() - watch.GUEST_IDLE_TIMEOUT_SECONDS + 1
+        )
+
+        self.assertTrue(self.state.state_for(token)["admitted"])
+        self.assertIn(token, self.state.sessions)
+
+    def test_inactive_guest_session_expires_after_idle_timeout(self) -> None:
+        token, _ = self.state.add_guest("Guest")
+        self.state.sessions[token]["last_seen"] = (
+            time.monotonic() - watch.GUEST_IDLE_TIMEOUT_SECONDS - 1
+        )
+
+        snapshot = self.state.state_for(token)
+
+        self.assertFalse(snapshot["admitted"])
+        self.assertNotIn(token, self.state.sessions)
 
     def test_expired_close_clears_room_and_signs_out_guests(self) -> None:
         self.state.add_guest("Guest")
@@ -153,6 +248,18 @@ class TheaterStateTests(unittest.TestCase):
         frame = read_exactly(ShortReader(payload), 640 * 360 * 3)
         self.assertEqual(len(frame), 640 * 360 * 3)
         self.assertEqual(frame, payload[:len(frame)])
+
+    def test_write_ppm_frame_uses_tk_builtin_image_format(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            frame_path = Path(folder) / "frame.ppm"
+            pixels = b"\xff\x00\x00\x00\xff\x00"
+            write_ppm_frame(frame_path, pixels, width=2, height=1)
+            self.assertEqual(frame_path.read_bytes(), b"P6\n2 1\n255\n" + pixels)
+
+    def test_write_ppm_frame_rejects_incomplete_rgb_data(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(ValueError, "Expected an RGB frame"):
+                write_ppm_frame(Path(folder) / "frame.ppm", b"\x00", width=2, height=1)
 
     def test_waiting_guest_cannot_send_messages_or_control_playback(self) -> None:
         guests = [self.state.add_guest(f"Guest {index}") for index in range(MAX_SEATS + 1)]
@@ -186,7 +293,7 @@ class TheaterStateTests(unittest.TestCase):
 
 class CloudHostApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.state = TheaterState("CLOUD-KEY")
+        self.state = TheaterState(DEFAULT_SEAT_KEY)
         handler = type(
             "CloudTestHandler",
             (TheaterHandler,),
@@ -221,7 +328,7 @@ class CloudHostApiTests(unittest.TestCase):
         self.connection.request("GET", "/api/host/state", headers={"X-Host-Token": result["token"]})
         response = self.connection.getresponse()
         self.assertEqual(response.status, 200)
-        self.assertEqual(json.loads(response.read())["seat_key"], "CLOUD-KEY")
+        self.assertEqual(json.loads(response.read())["seat_key"], DEFAULT_SEAT_KEY)
 
     def test_cloud_host_commands_require_admin_session(self) -> None:
         status, _ = self.post("/api/host/command", {"command": "restart theater"})
@@ -232,6 +339,28 @@ class CloudHostApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertGreater(self.state.state_for()["close_countdown"], 0)
 
+    def test_cloud_host_command_removes_guest_by_username(self) -> None:
+        guest_token, _ = self.state.add_guest("Alex")
+        _, login = self.post("/api/host/login", {"password": "A-secure-test-password"})
+
+        status, result = self.post(
+            "/api/host/command", {"command": "remove -user alex"}, login["token"]
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(result["ok"])
+        self.assertNotIn(guest_token, self.state.sessions)
+
+    def test_cloud_host_cannot_reinitialize_desktop_server(self) -> None:
+        _, login = self.post("/api/host/login", {"password": "A-secure-test-password"})
+
+        status, result = self.post(
+            "/api/host/command", {"command": "reinit -m --ser"}, login["token"]
+        )
+
+        self.assertEqual(status, 403)
+        self.assertIn("desktop host console", result["error"])
+
     def test_cloud_guest_page_and_host_page_are_served(self) -> None:
         for route in ("/", "/host"):
             self.connection.request("GET", route)
@@ -239,14 +368,35 @@ class CloudHostApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b"PRJ-00E1", response.read())
 
+    def test_guest_leave_endpoint_releases_seat(self) -> None:
+        status, login = self.post(
+            "/api/login",
+            {
+                "username": "Guest",
+                "seat_key": DEFAULT_SEAT_KEY,
+                "password": "FANTASY000",
+            },
+        )
+        self.assertEqual(status, 200)
+        token = login["token"]
+        self.assertEqual(self.state.state_for()["active"], 1)
+
+        self.connection.request(
+            "POST", "/api/leave", json.dumps({"token": token}),
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(self.connection.getresponse().status, 200)
+        self.assertEqual(self.state.state_for()["active"], 0)
+        self.assertNotIn(token, self.state.sessions)
+
     def test_video_element_cookie_can_access_guest_movie(self) -> None:
         with tempfile.TemporaryDirectory() as folder, patch.object(watch, "MEDIA_ROOT", Path(folder)):
             self.connection.request(
                 "POST", "/api/login",
                 json.dumps({
                     "username": "Guest",
-                    "seat_key": "CLOUD-KEY",
-                    "password": "hello_hello3_whatch_with me",
+                    "seat_key": DEFAULT_SEAT_KEY,
+                    "password": "FANTASY000",
                 }),
                 {"Content-Type": "application/json"},
             )
@@ -278,6 +428,20 @@ class CloudHostApiTests(unittest.TestCase):
             response = self.connection.getresponse()
             self.assertEqual(response.status, 206)
             self.assertEqual(response.read(), b"video")
+            self.connection.request(
+                "GET", "/media", headers={"Cookie": cookie.split(";", 1)[0], "Range": "bytes=-4"},
+            )
+            response = self.connection.getresponse()
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.getheader("Content-Range"), "bytes 7-10/11")
+            self.assertEqual(response.read(), b"ytes")
+            self.connection.request(
+                "HEAD", "/media", headers={"Cookie": cookie.split(";", 1)[0]},
+            )
+            response = self.connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Content-Type"), "video/mp4")
+            self.assertEqual(response.read(), b"")
 
     def test_cloud_host_preview_requires_host_cookie(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -294,6 +458,18 @@ class CloudHostApiTests(unittest.TestCase):
             response = self.connection.getresponse()
             self.assertEqual(response.status, 206)
             self.assertEqual(response.read(), b"host")
+            self.connection.request(
+                "HEAD", "/host-media",
+                headers={
+                    "Cookie": f"PRJ_HOST_SESSION={login['token']}",
+                    "Range": "bytes=0-3",
+                },
+            )
+            response = self.connection.getresponse()
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.getheader("Content-Range"), "bytes 0-3/10")
+            self.assertEqual(response.getheader("Content-Type"), "video/mp4")
+            self.assertEqual(response.read(), b"")
 
 
 if __name__ == "__main__":
